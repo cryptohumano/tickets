@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CiGo · Taquilla</title>
+  <link rel="did-configuration" href="/.well-known/did-configuration.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,640&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">CiGo <span>taquilla</span></a>
+    <nav>
+      <a href="#/" data-nav="cartelera">Cartelera</a>
+      <a href="#/recintos" data-nav="recintos">Recintos</a>
+      <a href="#/boletos" data-nav="boletos">Mis boletos</a>
+      <a href="#/organizar" data-nav="organizar">Organizar</a>
+    </nav>
+    <button id="wallet" type="button">Conectar Aura</button>
+  </header>
+  <main id="app"></main>
+  <footer>
+    <p>El boleto vive en tu identidad. Hasta cuatro por evento, una sola cesión al precio de cara, o de vuelta a la taquilla.</p>
+  </footer>
+  <script type="module" src="/app.js?v=3"></script>
+</body>
+</html>

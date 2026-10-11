@@ -1,0 +1,25 @@
+{
+  "@context": "https://identity.foundation/.well-known/did-configuration/v1",
+  "linked_dids": [
+    {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://identity.foundation/.well-known/did-configuration/v1"
+      ],
+      "type": [
+        "VerifiableCredential",
+        "DomainLinkageCredential"
+      ],
+      "issuer": "did:peranto:paseo:0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",
+      "issuanceDate": "2026-10-11T22:40:59.413Z",
+      "credentialSubject": {
+        "id": "did:peranto:paseo:0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",
+        "origin": "https://tickets.peranto.app"
+      },
+      "proof": {
+        "type": "JwtProof2020",
+        "jwt": "eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJkaWQ6cGVyYW50bzpwYXNlbzoweDM1NDE1MWQxMDM5QmEwNjg2MmY4YTUwNjJiMzdCQ2I4YjA4MmNFREYiLCJzdWIiOiJkaWQ6cGVyYW50bzpwYXNlbzoweDM1NDE1MWQxMDM5QmEwNjg2MmY4YTUwNjJiMzdCQ2I4YjA4MmNFREYiLCJpYXQiOjE3OTE3NTg0NTksInZjIjp7IkBjb250ZXh0IjpbImh0dHBzOi8vd3d3LnczLm9yZy8yMDE4L2NyZWRlbnRpYWxzL3YxIl0sInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiLCJEb21haW5MaW5rYWdlQ3JlZGVudGlhbCJdLCJpc3N1ZXIiOiJkaWQ6cGVyYW50bzpwYXNlbzoweDM1NDE1MWQxMDM5QmEwNjg2MmY4YTUwNjJiMzdCQ2I4YjA4MmNFREYiLCJpc3N1YW5jZURhdGUiOiIyMDI2LTEwLTExVDIyOjQwOjU5LjQwN1oiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6ImRpZDpwZXJhbnRvOnBhc2VvOjB4MzU0MTUxZDEwMzlCYTA2ODYyZjhhNTA2MmIzN0JDYjhiMDgyY0VERiIsIm9yaWdpbiI6Imh0dHBzOi8vdGlja2V0cy5wZXJhbnRvLmFwcCJ9LCJjcmVkZW50aWFsU2NoZW1hIjp7ImlkIjoicGVyYW50bzpEb21haW5MaW5rYWdlOnYxIiwidHlwZSI6Ikpzb25TY2hlbWEifX19.pYIqYHVLvAWDfy-dXy5-VMLaJYap0_mBIoM32TNYHcA5TC_wgAHIvqAzYco8J7Sk8TQdeIzDsSsGsvKx9Md13A"
+      }
+    }
+  ]
+}

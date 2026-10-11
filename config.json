@@ -1,0 +1,135 @@
+{
+  "address": "0x9a196ca47F0eaD5469185478Ea3651798F101D16",
+  "chainId": 420420417,
+  "rpc": "https://eth-rpc-testnet.polkadot.io/",
+  "deployer": "0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",
+  "fromBlock": 14319709,
+  "venues": [
+    {
+      "slug": "foro-sol",
+      "name": "Foro Sol",
+      "city": "Ciudad de México",
+      "capacity": 65000,
+      "kind": "estadio",
+      "note": "Explanada de conciertos, aforo de festival."
+    },
+    {
+      "slug": "palacio-de-los-deportes",
+      "name": "Palacio de los Deportes",
+      "city": "Ciudad de México",
+      "capacity": 20000,
+      "kind": "arena",
+      "note": "Arena techada para música y deporte."
+    },
+    {
+      "slug": "auditorio-nacional",
+      "name": "Auditorio Nacional",
+      "city": "Ciudad de México",
+      "capacity": 9366,
+      "kind": "auditorio",
+      "note": "Sala mayor, butaca numerada."
+    },
+    {
+      "slug": "circo-volador",
+      "name": "Circo Volador",
+      "city": "Ciudad de México",
+      "capacity": 2000,
+      "kind": "foro",
+      "note": "Carpa de la Roma, pie y pista."
+    },
+    {
+      "slug": "plaza-condesa",
+      "name": "Plaza Condesa",
+      "city": "Ciudad de México",
+      "capacity": 1900,
+      "kind": "foro",
+      "note": "Sala de la colonia Condesa."
+    },
+    {
+      "slug": "lunario",
+      "name": "Lunario del Auditorio",
+      "city": "Ciudad de México",
+      "capacity": 968,
+      "kind": "foro",
+      "note": "Sala chica junto al Auditorio Nacional."
+    },
+    {
+      "slug": "salon-los-angeles",
+      "name": "Salón Los Ángeles",
+      "city": "Ciudad de México",
+      "capacity": 800,
+      "kind": "salón",
+      "note": "Pista de danzón y baile de salón."
+    },
+    {
+      "slug": "foro-indie-rocks",
+      "name": "Foro Indie Rocks",
+      "city": "Ciudad de México",
+      "capacity": 400,
+      "kind": "foro",
+      "note": "Sala independiente."
+    },
+    {
+      "slug": "pasaguero",
+      "name": "Pasagüero",
+      "city": "Ciudad de México",
+      "capacity": 350,
+      "kind": "foro",
+      "note": "Foro del centro."
+    },
+    {
+      "slug": "caradura",
+      "name": "Caradura",
+      "city": "Ciudad de México",
+      "capacity": 220,
+      "kind": "foro",
+      "note": "Sala pequeña de la Juárez."
+    },
+    {
+      "slug": "foro-hilvana",
+      "name": "Foro Hilvana",
+      "city": "Ciudad de México",
+      "capacity": 180,
+      "kind": "foro",
+      "note": "Aforo corto, entrada controlada."
+    },
+    {
+      "slug": "multiforo-alicia",
+      "name": "Multiforo Cultural Alicia",
+      "city": "Ciudad de México",
+      "capacity": 150,
+      "kind": "foro",
+      "note": "El Alicia. Cupo limitado, sin reventa."
+    }
+  ],
+  "categories": [
+    {
+      "slug": "musica",
+      "name": "Música"
+    },
+    {
+      "slug": "teatro",
+      "name": "Teatro"
+    },
+    {
+      "slug": "deporte",
+      "name": "Deporte"
+    },
+    {
+      "slug": "comedia",
+      "name": "Comedia"
+    },
+    {
+      "slug": "danza",
+      "name": "Danza"
+    },
+    {
+      "slug": "familiar",
+      "name": "Familiar"
+    },
+    {
+      "slug": "cultura",
+      "name": "Cultura"
+    }
+  ]
+}
