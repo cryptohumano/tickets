@@ -1,5 +1,6 @@
 {
   "address": "0x9a196ca47F0eaD5469185478Ea3651798F101D16",
+  "desk": "0x9a196ca47F0eaD5469185478Ea3651798F101D16",
   "chainId": 420420417,
   "rpc": "https://eth-rpc-testnet.polkadot.io/",
   "deployer": "0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",

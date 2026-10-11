@@ -19962,6 +19962,11 @@ function pas(wei) {
 function hexWei(value) {
   return `0x${BigInt(value).toString(16)}`;
 }
+function deskAddress() {
+  const desk = state.config.desk || state.config.address;
+  if (!desk) throw new Error("Todav\xEDa no hay contrato de taquilla.");
+  return desk;
+}
 function venueOf(slug) {
   return state.config.venues.find((venue) => venue.slug === slug);
 }
@@ -20022,7 +20027,7 @@ async function send(tx2) {
 }
 function tx(name, args, value = 0n) {
   return {
-    to: state.config.desk,
+    to: deskAddress(),
     data: encodeFunctionData({ abi: abi2, functionName: name, args }),
     value: hexWei(value)
   };
@@ -20060,7 +20065,7 @@ async function proofFor(account, eventId) {
   };
 }
 async function loadShows() {
-  const desk = state.config.desk;
+  const desk = deskAddress();
   const next = await state.client.readContract({ address: desk, abi: abi2, functionName: "nextEvent" });
   const shows = [];
   for (let id = 1n; id < next; id++) {
@@ -20099,7 +20104,7 @@ async function loadEditors(shows) {
   await Promise.all(
     shows.map(async (show) => {
       show.editors = await state.client.readContract({
-        address: state.config.desk,
+        address: deskAddress(),
         abi: abi2,
         functionName: "editorsOf",
         args: [BigInt(show.id)]
@@ -20109,7 +20114,7 @@ async function loadEditors(shows) {
 }
 async function loadPasses() {
   const logs = await state.client.getLogs({
-    address: state.config.desk,
+    address: deskAddress(),
     fromBlock: BigInt(state.config.fromBlock || 0),
     toBlock: "latest"
   });
@@ -20348,7 +20353,7 @@ async function offerPass(passId, status) {
     const structHash = keccak256(
       encodeAbiParameters(
         [{ type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "address" }, { type: "uint64" }],
-        [BigInt(state.config.chainId), state.config.desk, BigInt(passId), recipient, BigInt(deadline)]
+        [BigInt(state.config.chainId), deskAddress(), BigInt(passId), recipient, BigInt(deadline)]
       )
     );
     const signature = await aura().request({ method: "personal_sign", params: [structHash, state.account] });
