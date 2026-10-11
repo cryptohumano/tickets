@@ -20074,26 +20074,27 @@ async function loadShows() {
       state.client.readContract({ address: desk, abi: abi2, functionName: "cards", args: [id] }),
       state.client.readContract({ address: desk, abi: abi2, functionName: "admittedCount", args: [id] })
     ]);
-    if (!show.exists) continue;
-    const capacity = Number(show.capacity);
-    const inventory = Number(show.inventory);
+    const exists = show.exists ?? show[10];
+    if (!exists) continue;
+    const capacity = Number(show.capacity ?? show[1]);
+    const inventory = Number(show.inventory ?? show[2]);
     shows.push({
       id: Number(id),
-      organizer: show.organizer,
+      organizer: show.organizer ?? show[0],
       capacity,
       inventory,
       sold: capacity - inventory,
-      facePrice: show.facePrice,
-      opensAt: Number(show.opensAt),
-      closesAt: Number(show.closesAt),
-      escrow: show.escrow,
-      title: card2.title,
-      summary: card2.summary,
-      image: card2.image,
-      venue: card2.venueSlug,
-      category: card2.categorySlug,
-      venueCap: Number(card2.venueCap),
-      priceMxn: Number(card2.priceMxn),
+      facePrice: show.facePrice ?? show[3],
+      opensAt: Number(show.opensAt ?? show[4]),
+      closesAt: Number(show.closesAt ?? show[5]),
+      escrow: show.escrow ?? show[9],
+      title: card2.title ?? card2[0],
+      summary: card2.summary ?? card2[1],
+      image: card2.image ?? card2[2],
+      venue: card2.venueSlug ?? card2[3],
+      category: card2.categorySlug ?? card2[4],
+      venueCap: Number(card2.venueCap ?? card2[5]),
+      priceMxn: Number(card2.priceMxn ?? card2[6]),
       admitted: Number(admitted),
       editors: []
     });
