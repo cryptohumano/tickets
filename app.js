@@ -29853,7 +29853,7 @@ init_keccak256();
 var app = document.querySelector("#app");
 var walletBtn = document.querySelector("#wallet");
 var OFFERS = "cigo.tickets.offers.v1";
-var state = { account: "", config: null, client: null, category: "", editing: 0, notice: "" };
+var state = { account: "", config: null, client: null, category: "", editing: 0, notice: "", step: 1, panel: "resumen", ledger: /* @__PURE__ */ new Map() };
 var cardTuple = [
   { name: "title", type: "string" },
   { name: "summary", type: "string" },
@@ -29890,7 +29890,8 @@ var abi2 = [
       { name: "categoryId", type: "bytes32" },
       { name: "metaHash", type: "bytes32" },
       { name: "escrow", type: "uint256" },
-      { name: "exists", type: "bool" }
+      { name: "exists", type: "bool" },
+      { name: "finalized", type: "bool" }
     ]
   },
   {
@@ -29903,6 +29904,21 @@ var abi2 = [
   { type: "function", name: "admittedCount", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint32" }] },
   { type: "function", name: "heldCount", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "bytes32" }], outputs: [{ type: "uint8" }] },
   { type: "function", name: "editorsOf", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address[]" }] },
+  { type: "function", name: "doorsOf", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address[]" }] },
+  { type: "function", name: "editor", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "doorStaff", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "finalize", stateMutability: "nonpayable", inputs: [{ name: "eventId", type: "uint256" }], outputs: [] },
+  {
+    type: "function",
+    name: "setDoor",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "eventId", type: "uint256" },
+      { name: "who", type: "address" },
+      { name: "allowed", type: "bool" }
+    ],
+    outputs: []
+  },
   { type: "function", name: "selfAttest", stateMutability: "nonpayable", inputs: [], outputs: [] },
   {
     type: "function",
@@ -29996,7 +30012,8 @@ var abi2 = [
       { name: "active", type: "bool" },
       { name: "admitted", type: "bool" },
       { name: "funder", type: "address" },
-      { name: "basis", type: "uint256" }
+      { name: "basis", type: "uint256" },
+      { name: "late", type: "bool" }
     ]
   },
   { type: "function", name: "withdraw", stateMutability: "nonpayable", inputs: [{ name: "eventId", type: "uint256" }], outputs: [] },
@@ -30007,9 +30024,11 @@ var abi2 = [
       { name: "eventId", type: "uint256", indexed: true },
       { name: "passId", type: "uint256", indexed: true },
       { name: "holder", type: "address", indexed: true },
-      { name: "person", type: "bytes32", indexed: false }
+      { name: "person", type: "bytes32", indexed: false },
+      { name: "late", type: "bool", indexed: false }
     ]
   },
+  { type: "event", name: "EventFinalized", inputs: [{ name: "id", type: "uint256", indexed: true }] },
   {
     type: "event",
     name: "Transferred",
@@ -30070,6 +30089,13 @@ function posterData(title, venue) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000"><rect width="800" height="1000" fill="#0a1018"/><circle cx="640" cy="180" r="220" fill="#3da1bc" opacity="0.35"/><text x="56" y="120" fill="#f3e6c4" font-family="Georgia, serif" font-size="28">CiGo \xB7 taquilla</text><text x="56" y="430" fill="#ffffff" font-family="Georgia, serif" font-size="64">${safe}</text><text x="56" y="860" fill="#f6f4ef" font-family="sans-serif" font-size="32">${place}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
+function flyerOf(show) {
+  const src = String(show.image || "");
+  if (src.startsWith("/media/") && !src.includes("..")) return src;
+  if (/^https:\/\/\S+$/i.test(src)) return src;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><rect width="1600" height="900" fill="#0a1018"/><circle cx="1280" cy="180" r="360" fill="#3da1bc" opacity="0.35"/></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 function imageOf(show) {
   const src = String(show.image || "");
   if (src.startsWith("/media/") && !src.includes("..")) return src;
@@ -30100,7 +30126,7 @@ function aura() {
 async function connect() {
   const [account] = await aura().request({ method: "eth_requestAccounts" });
   state.account = getAddress(account);
-  walletBtn.textContent = `${state.account.slice(0, 6)}\u2026${state.account.slice(-4)}`;
+  paintWallet();
   return state.account;
 }
 async function send(tx2) {
@@ -30187,7 +30213,9 @@ async function loadShows() {
       venueCap: Number(card2.venueCap ?? card2[5]),
       priceMxn: Number(card2.priceMxn ?? card2[6]),
       admitted: Number(admitted),
-      editors: []
+      editors: [],
+      doors: [],
+      finalized: Boolean(show.finalized ?? show[11])
     });
   }
   return shows;
@@ -30195,14 +30223,20 @@ async function loadShows() {
 async function loadEditors(shows) {
   await Promise.all(
     shows.map(async (show) => {
-      show.editors = await state.client.readContract({
-        address: deskAddress(),
-        abi: abi2,
-        functionName: "editorsOf",
-        args: [BigInt(show.id)]
-      });
+      const [editors, doors] = await Promise.all([
+        state.client.readContract({ address: deskAddress(), abi: abi2, functionName: "editorsOf", args: [BigInt(show.id)] }),
+        state.client.readContract({ address: deskAddress(), abi: abi2, functionName: "doorsOf", args: [BigInt(show.id)] })
+      ]);
+      show.editors = editors;
+      show.doors = doors;
     })
   );
+}
+function bump(eventId) {
+  const key = Number(eventId);
+  const row = state.ledger.get(key) || { sales: 0, refunds: 0, transfers: 0, late: 0 };
+  state.ledger.set(key, row);
+  return row;
 }
 async function loadPasses() {
   const logs = await state.client.getLogs({
@@ -30211,6 +30245,7 @@ async function loadPasses() {
     toBlock: "latest"
   });
   const map = /* @__PURE__ */ new Map();
+  state.ledger = /* @__PURE__ */ new Map();
   for (const log of logs) {
     let parsed;
     try {
@@ -30219,19 +30254,26 @@ async function loadPasses() {
       continue;
     }
     if (parsed.eventName === "Purchased") {
+      const eventId = Number(parsed.args.eventId);
+      const late = Boolean(parsed.args.late);
       map.set(String(parsed.args.passId), {
         passId: Number(parsed.args.passId),
-        eventId: Number(parsed.args.eventId),
+        eventId,
         holder: parsed.args.holder,
         hops: 0,
-        status: "activo"
+        status: "activo",
+        late
       });
+      const row = bump(eventId);
+      row.sales += 1;
+      if (late) row.late += 1;
     }
     if (parsed.eventName === "Transferred") {
       const row = map.get(String(parsed.args.passId));
       if (row) {
         row.holder = parsed.args.to;
         row.hops = 1;
+        bump(row.eventId).transfers += 1;
       }
     }
     if (parsed.eventName === "Returned") {
@@ -30239,6 +30281,7 @@ async function loadPasses() {
       if (row) {
         row.status = "devuelto";
         row.holder = "";
+        bump(row.eventId).refunds += 1;
       }
     }
     if (parsed.eventName === "Admitted") {
@@ -30254,7 +30297,41 @@ function isOrganizer(show) {
 function isStaff(show) {
   if (!state.account) return false;
   if (isOrganizer(show)) return true;
-  return (show.editors || []).some((who) => who.toLowerCase() === state.account.toLowerCase());
+  const mine = state.account.toLowerCase();
+  return [...show.editors || [], ...show.doors || []].some((who) => who.toLowerCase() === mine);
+}
+var GRACE = 30 * 60;
+function phase(show) {
+  const now = Date.now() / 1e3;
+  if (show.finalized) return "finalizado";
+  if (!show.closesAt || now < show.closesAt) return "publicado";
+  if (now <= show.closesAt + GRACE) return "encurso";
+  return "cerrado";
+}
+function phaseLabel(show) {
+  return { publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
+}
+function phaseNote(show) {
+  const kind = phase(show);
+  if (kind === "publicado") return "Antes de la funci\xF3n. La venta est\xE1 abierta y cada boleto se puede ceder una vez.";
+  if (kind === "encurso") return "La funci\xF3n ya empez\xF3. Se puede vender 30 minutos m\xE1s. Ese boleto no se cede.";
+  if (kind === "cerrado") return "Despu\xE9s de la funci\xF3n. La venta cerr\xF3. Finalizar apaga la puerta y las devoluciones.";
+  return "Finalizado. Todos los pases quedan cerrados: no se venden, no se ceden y no se devuelven.";
+}
+function shortAddress(value) {
+  const text = String(value || "");
+  return text.length > 12 ? `${text.slice(0, 6)}\u2026${text.slice(-4)}` : text;
+}
+function identicon(value) {
+  const n = Number.parseInt(String(value).slice(2, 8), 16) || 200;
+  return `<span class="mark" style="background:hsl(${n % 360} 42% 38%)"></span>`;
+}
+function paintWallet() {
+  if (!state.account) {
+    walletBtn.textContent = "Conectar Aura";
+    return;
+  }
+  walletBtn.innerHTML = `<span>${shortAddress(state.account)}</span><span class="net">Paseo \xB7 prueba</span>`;
 }
 function route() {
   const hash3 = location.hash.replace(/^#/, "") || "/";
@@ -30271,6 +30348,8 @@ function route() {
   if (parts[0] === "recintos") return parts[1] ? recinto(parts[1]) : recintos();
   if (parts[0] === "boletos") return boletos();
   if (parts[0] === "puerta") return puerta();
+  if (parts[0] === "organizar" && parts[1] === "nuevo") return crear();
+  if (parts[0] === "organizar" && parts[1]) return tablero(Number(parts[1]));
   if (parts[0] === "organizar") return organizar();
   return cartelera();
 }
@@ -30290,7 +30369,8 @@ function card(show) {
 }
 async function cartelera() {
   const shows = await loadShows();
-  const filtered = state.category ? shows.filter((show) => show.category === state.category) : shows;
+  const open = shows.filter((show) => phase(show) === "publicado" || phase(show) === "encurso");
+  const filtered = state.category ? open.filter((show) => show.category === state.category) : open;
   app.innerHTML = `
     <section class="hero">
       <p class="meta">Ciudad de M\xE9xico</p>
@@ -30350,11 +30430,15 @@ async function evento(id) {
   app.querySelector("#buy")?.addEventListener("click", () => buyShow(show, Number(qty?.value) || 1, status));
 }
 function buyBox(show) {
+  const kind = phase(show);
+  if (kind === "finalizado" || kind === "cerrado") return `<button class="solid" type="button" disabled>Venta cerrada</button>`;
   const max = Math.min(4, show.inventory);
   if (max < 1) return `<button class="solid" type="button" disabled>Agotado</button>`;
   const options = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+  const late = kind === "encurso" ? `<p class="meta">La funci\xF3n ya empez\xF3. Este boleto no se puede ceder.</p>` : "";
   return `<label>Cu\xE1ntos boletos <select id="qty">${options}</select></label>
     <p class="meta" id="total"></p>
+    ${late}
     <button class="solid" id="buy" type="button">Comprar con Aura</button>`;
 }
 async function heldBy(account, eventId) {
@@ -30421,8 +30505,9 @@ async function recinto(slug) {
 }
 function ticketView(pass, show) {
   const entered = pass.status === "entro";
-  const once = pass.hops === 0 && pass.status === "activo";
-  const note = entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
+  const closed = show && (phase(show) === "finalizado" || phase(show) === "cerrado");
+  const once = !closed && !pass.late && pass.hops === 0 && pass.status === "activo";
+  const note = show?.finalized ? "La funci\xF3n finaliz\xF3. Este pase qued\xF3 cerrado." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
   return `<article class="ticket">
     <img src="${imageOf(show)}" alt="" />
     <div>
@@ -30430,7 +30515,7 @@ function ticketView(pass, show) {
       <p class="meta">${show ? whenUnix(show.closesAt) : ""} \xB7 ${note}</p>
       <div class="row">
         ${once ? `<button class="ghost" type="button" data-offer="${pass.passId}" data-event="${pass.eventId}">Ceder una vez</button>` : ""}
-        ${pass.status === "activo" ? `<button class="ghost" type="button" data-return="${pass.passId}">Devolver a la taquilla</button>` : ""}
+        ${!closed && pass.status === "activo" ? `<button class="ghost" type="button" data-return="${pass.passId}">Devolver a la taquilla</button>` : ""}
       </div>
     </div>
   </article>`;
@@ -30609,107 +30694,260 @@ function cardFrom(form, venue) {
     priceMxn: Math.max(0, Math.round(Number(form.get("priceMxn")) || 0))
   };
 }
-function metrics(show) {
-  return `<div class="metrics">
-    <p class="metric"><b>${show.sold}</b> vendidos</p>
-    <p class="metric"><b>${show.inventory}</b> disponibles</p>
-    <p class="metric"><b>${show.capacity}</b> de aforo</p>
-    <p class="metric"><b>${show.admitted}</b> entradas</p>
-    <p class="metric"><b>${esc(pas(show.escrow))}</b> en custodia</p>
-  </div>`;
-}
 async function organizar() {
   const shows = await loadShows();
+  await loadPasses();
   if (state.account) await loadEditors(shows);
   const mine = state.account ? shows.filter((show) => isStaff(show)) : [];
+  const book = mine.reduce(
+    (sum, show) => {
+      const row = state.ledger.get(show.id) || { sales: 0, refunds: 0, transfers: 0 };
+      sum.sold += show.sold;
+      sum.refunds += row.refunds;
+      sum.admitted += show.admitted;
+      sum.escrow += show.escrow;
+      return sum;
+    },
+    { sold: 0, refunds: 0, admitted: 0, escrow: 0n }
+  );
   app.innerHTML = `
-    <section class="page layout">
-      <div>
-        <h1>Organizar</h1>
-        <p class="lead">Publicas el evento, el precio y el aforo. Quien lo crea puede cambiarlo, y puede armar una lista de quienes tambi\xE9n pueden. El retiro del dinero se queda con quien lo cre\xF3.</p>
-        <form id="form" class="panel">
-          <label>T\xEDtulo <input name="title" required minlength="3" maxlength="120" /></label>
-          <label>Resumen <textarea name="summary" rows="3" maxlength="600"></textarea></label>
-          <label>Categor\xEDa <select name="category">${state.config.categories.map((cat) => `<option value="${esc(cat.slug)}">${esc(cat.name)}</option>`).join("")}</select></label>
-          <label>Recinto <select name="venue" id="venue">${state.config.venues.map((venue2) => `<option value="${esc(venue2.slug)}" data-cap="${venue2.capacity}">${esc(venue2.name)} \xB7 ${venue2.capacity.toLocaleString("es-MX")}</option>`).join("")}</select></label>
-          <label>Boletos <input name="capacity" type="number" min="1" value="150" required /></label>
-          <label>Precio de cara, pesos <input name="priceMxn" type="number" min="0" value="200" required /></label>
-          <label>Precio en la red, PAS <input name="pas" type="number" min="0" step="0.001" value="0" /></label>
-          <label>Fecha y hora <input name="startsAt" type="datetime-local" required /></label>
-          <label>Cartel, direcci\xF3n https <input name="image" placeholder="https://\u2026" /></label>
-          <button class="solid" type="submit">Crear y publicar con Aura</button>
-          <p class="status" id="status"></p>
-        </form>
+    <section class="page">
+      <div class="split">
+        <div>
+          <h1>Mis funciones</h1>
+          <p class="lead">Antes, durante y despu\xE9s: ventas, reembolsos y entradas. Crear una funci\xF3n es otro paso.</p>
+        </div>
+        <a class="solid link" href="#/organizar/nuevo">Nueva funci\xF3n</a>
       </div>
-      <div>
-        <h2>Tus funciones</h2>
-        ${mine.map((show) => {
-    const locked = show.sold > 0;
-    return `<article class="ticket staff">
-                <img src="${imageOf(show)}" alt="" />
-                <div>
-                  <h2>${esc(show.title)}</h2>
-                  <p class="meta">${isOrganizer(show) ? "La creaste t\xFA" : "Est\xE1s en la lista"} \xB7 #${show.id}</p>
-                  ${metrics(show)}
-                  <div class="row">
-                    <button class="ghost" type="button" data-edit="${show.id}">${state.editing === show.id ? "Cerrar" : "Modificar"}</button>
-                    <a class="ghost" href="#/puerta/${show.id}">Puerta</a>
-                    ${isOrganizer(show) && show.escrow > 0n && (show.closesAt === 0 || Date.now() / 1e3 >= show.closesAt) ? `<button class="ghost" type="button" data-withdraw="${show.id}">Retirar custodia</button>` : ""}
-                  </div>
-                  ${state.editing === show.id ? `<form class="panel" data-save="${show.id}">
-                          <label>T\xEDtulo <input name="title" required minlength="3" maxlength="120" value="${esc(show.title)}" /></label>
-                          <label>Resumen <textarea name="summary" rows="3" maxlength="600">${esc(show.summary)}</textarea></label>
-                          <label>Categor\xEDa <select name="category">${state.config.categories.map((cat) => `<option value="${esc(cat.slug)}" ${cat.slug === show.category ? "selected" : ""}>${esc(cat.name)}</option>`).join("")}</select></label>
-                          <label>Recinto <select name="venue">${state.config.venues.map((venue2) => `<option value="${esc(venue2.slug)}" data-cap="${venue2.capacity}" ${venue2.slug === show.venue ? "selected" : ""}>${esc(venue2.name)}</option>`).join("")}</select></label>
-                          <label>Boletos <input name="capacity" type="number" min="${Math.max(1, show.sold)}" max="${show.venueCap}" value="${show.capacity}" required /></label>
-                          <label>Precio de cara, pesos <input name="priceMxn" type="number" min="0" value="${show.priceMxn}" required /></label>
-                          <label>Precio en la red, PAS <input name="pas" type="number" min="0" step="0.001" value="${Number(show.facePrice) / 1e18}" ${locked ? "disabled" : ""} /></label>
-                          ${locked ? '<p class="meta">El precio en la red queda fijo porque ya hay boletos vendidos. La cesi\xF3n no puede pasar de ese monto.</p>' : ""}
-                          <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${localInput(show.closesAt)}" /></label>
-                          <label>Cartel <input name="image" value="${esc(show.image)}" /></label>
-                          <button class="solid" type="submit">Guardar en la red</button>
-                        </form>` : ""}
-                  ${isOrganizer(show) ? `<form class="panel" data-editor="${show.id}">
-                          <p class="meta">Lista de quienes pueden modificar y marcar la entrada.</p>
-                          ${(show.editors || []).map((who) => `<p class="row"><span>${esc(who)}</span> <button class="ghost" type="button" data-drop="${esc(who)}" data-event="${show.id}">Quitar</button></p>`).join("") || '<p class="meta">Nadie m\xE1s.</p>'}
-                          <label>Direcci\xF3n <input name="who" placeholder="0x\u2026" required /></label>
-                          <button class="ghost" type="submit">Agregar a la lista</button>
-                        </form>` : ""}
-                </div>
-              </article>`;
-  }).join("") || "<p>Conecta Aura. Aqu\xED aparecen las funciones que creaste y aquellas en cuya lista est\xE1s.</p>"}
-        <p class="status" id="side"></p>
-      </div>
+      ${state.account ? `<div class="kpis">
+              ${kpi("Funciones", mine.length, "a tu cargo")}
+              ${kpi("Vendidos", book.sold, "boletos en circulaci\xF3n")}
+              ${kpi("Reembolsos", book.refunds, "volvieron a taquilla")}
+              ${kpi("Entradas", book.admitted, "pasaron la puerta")}
+              ${kpi("Custodia", pas(book.escrow), "en la red")}
+            </div>
+            <div class="event-grid">${mine.map(eventCard).join("") || "<p>Todav\xEDa no organizas ninguna funci\xF3n.</p>"}</div>` : `<p>Conecta Aura para ver las funciones que creaste.</p><button class="solid" id="go" type="button">Conectar Aura</button>`}
+    </section>`;
+  app.querySelector("#go")?.addEventListener("click", async () => {
+    await connect();
+    organizar();
+  });
+}
+function kpi(label, value, hint) {
+  return `<article class="kpi"><p>${esc(label)}</p><b>${esc(value)}</b><small>${esc(hint)}</small></article>`;
+}
+function eventCard(show) {
+  const row = state.ledger.get(show.id) || { refunds: 0 };
+  const pct = show.capacity ? Math.min(100, Math.round(show.sold / show.capacity * 100)) : 0;
+  const venue = venueOf(show.venue);
+  return `<a class="event-card" href="#/organizar/${show.id}">
+    <img src="${flyerOf(show)}" alt="" />
+    <div>
+      <span class="badge ${phase(show)}">${phaseLabel(show)}</span>
+      <h2>${esc(show.title)}</h2>
+      <p class="meta">${whenUnix(show.closesAt)} \xB7 ${esc(venue?.name || show.venue)}</p>
+      <div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div>
+      <p class="meta">${show.sold} vendidos \xB7 ${row.refunds} reembolsos \xB7 ${show.admitted} entradas</p>
+    </div>
+  </a>`;
+}
+async function crear() {
+  if (!state.account) {
+    app.innerHTML = `<section class="page"><h1>Nueva funci\xF3n</h1><p class="lead">Conecta Aura para publicarla.</p><button class="solid" id="go" type="button">Conectar Aura</button></section>`;
+    app.querySelector("#go").onclick = async () => {
+      await connect();
+      crear();
+    };
+    return;
+  }
+  const step = state.step || 1;
+  const draft = state.draft || {};
+  app.innerHTML = `
+    <section class="page narrow">
+      <p class="meta"><a href="#/organizar">Mis funciones</a></p>
+      <h1>Nueva funci\xF3n</h1>
+      <ol class="wizard">
+        <li class="${step === 1 ? "on" : ""}">1 \xB7 La funci\xF3n</li>
+        <li class="${step === 2 ? "on" : ""}">2 \xB7 Aforo y precio</li>
+        <li class="${step === 3 ? "on" : ""}">3 \xB7 Publicar</li>
+      </ol>
+      <form id="form" class="panel">
+        ${step === 1 ? stepInfo(draft) : ""}
+        ${step === 2 ? stepMoney(draft) : ""}
+        ${step === 3 ? stepPublish(draft) : ""}
+        <div class="row">
+          ${step > 1 ? `<button class="ghost" id="back" type="button">Atr\xE1s</button>` : ""}
+          <button class="solid" type="submit">${step === 3 ? "Publicar con Aura" : "Siguiente"}</button>
+        </div>
+        <p class="status" id="status"></p>
+      </form>
     </section>`;
   const venue = app.querySelector("#venue");
-  const cap = app.querySelector("#form [name=capacity]");
-  const fit = () => {
-    const max = Number(venue.selectedOptions[0].dataset.cap);
-    cap.max = String(max);
-    if (Number(cap.value) > max) cap.value = String(max);
+  const cap = app.querySelector("[name=capacity]");
+  if (venue && cap) {
+    const fit = () => {
+      const max = Number(venue.selectedOptions[0].dataset.cap);
+      cap.max = String(max);
+      if (Number(cap.value) > max) cap.value = String(max);
+    };
+    venue.onchange = fit;
+    fit();
+  }
+  app.querySelector("#back")?.addEventListener("click", () => {
+    state.draft = { ...draft, ...Object.fromEntries(new FormData(app.querySelector("#form")).entries()) };
+    state.step = Math.max(1, step - 1);
+    crear();
+  });
+  app.querySelector("#form").onsubmit = (ev) => {
+    ev.preventDefault();
+    state.draft = { ...draft, ...Object.fromEntries(new FormData(ev.target).entries()) };
+    if (step < 3) {
+      state.step = step + 1;
+      crear();
+      return;
+    }
+    submitCreate(ev);
   };
-  venue.onchange = fit;
-  fit();
-  app.querySelector("#form").onsubmit = (ev) => submitCreate(ev);
-  app.querySelectorAll("[data-edit]").forEach((button) => {
+}
+function stepInfo(draft) {
+  return `<label>T\xEDtulo <input name="title" required minlength="3" maxlength="120" value="${esc(draft.title || "")}" placeholder="Ana Tijoux en concierto" /></label>
+    <label>Resumen <textarea name="summary" rows="3" maxlength="600" placeholder="Qu\xE9 va a pasar, en una frase.">${esc(draft.summary || "")}</textarea></label>
+    <label>Categor\xEDa <select name="category">${state.config.categories.map((cat) => `<option value="${esc(cat.slug)}" ${cat.slug === draft.category ? "selected" : ""}>${esc(cat.name)}</option>`).join("")}</select></label>
+    <label>Recinto <select name="venue" id="venue">${state.config.venues.map((venue) => `<option value="${esc(venue.slug)}" data-cap="${venue.capacity}" ${venue.slug === draft.venue ? "selected" : ""}>${esc(venue.name)} \xB7 ${venue.capacity.toLocaleString("es-MX")}</option>`).join("")}</select></label>
+    <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${esc(draft.startsAt || "")}" /></label>
+    <label>Cartel <input name="image" value="${esc(draft.image || "")}" placeholder="https://\u2026 o /media/cartel.svg" /></label>`;
+}
+function stepMoney(draft) {
+  return `<label>Boletos <input name="capacity" type="number" min="1" value="${esc(draft.capacity || "150")}" required /></label>
+    <label>Precio de cara <span class="adorn"><span>$</span><input name="priceMxn" type="number" min="0" value="${esc(draft.priceMxn || "200")}" required /><span>MXN</span></span></label>
+    <fieldset>
+      <legend>En la red</legend>
+      <p class="meta">PAS es la moneda de la red de pruebas. En cero, el boleto no cobra ah\xED y la cesi\xF3n es un regalo. Aura es la cartera que firma esta publicaci\xF3n.</p>
+      <label>Tope de cesi\xF3n <span class="adorn"><input name="pas" type="number" min="0" step="0.001" value="${esc(draft.pas || "0")}" /><span>PAS</span></span></label>
+    </fieldset>`;
+}
+function stepPublish(draft) {
+  const venue = venueOf(draft.venue);
+  return `<div class="review">
+      <p class="meta">As\xED queda publicada</p>
+      <h2>${esc(draft.title || "Sin t\xEDtulo")}</h2>
+      <p>${esc(venue?.name || draft.venue || "")} \xB7 ${esc(draft.startsAt || "")}</p>
+      <p>${esc(draft.capacity || "0")} boletos \xB7 ${money(Number(draft.priceMxn) || 0)} \xB7 ${esc(draft.pas || "0")} PAS</p>
+      <p class="meta">Despu\xE9s de publicar puedes invitar a quien modifica la funci\xF3n y a quien solo abre la puerta. La venta sigue 30 minutos despu\xE9s de empezar; ese boleto no se cede. Puedes finalizar cuando la funci\xF3n ya comenz\xF3.</p>
+    </div>`;
+}
+async function tablero(id) {
+  const shows = await loadShows();
+  await loadPasses();
+  if (state.account) await loadEditors(shows);
+  const show = shows.find((item) => item.id === id);
+  if (!show || !isStaff(show)) {
+    app.innerHTML = `<section class="page"><p class="meta"><a href="#/organizar">Mis funciones</a></p><h1>Funci\xF3n</h1><p>Esta cuenta no organiza esa funci\xF3n.</p></section>`;
+    return;
+  }
+  const venue = venueOf(show.venue);
+  const row = state.ledger.get(show.id) || { sales: 0, refunds: 0, transfers: 0, late: 0 };
+  const pct = show.capacity ? Math.min(100, Math.round(show.sold / show.capacity * 100)) : 0;
+  const kind = phase(show);
+  const canFinalize = isOrganizer(show) && !show.finalized && show.closesAt && Date.now() / 1e3 >= show.closesAt;
+  const canWithdraw = isOrganizer(show) && show.escrow > 0n && show.closesAt && Date.now() / 1e3 >= show.closesAt;
+  app.innerHTML = `
+    <section class="page">
+      <p class="meta"><a href="#/organizar">Mis funciones</a></p>
+      <figure class="flyer">
+        <img src="${show.image ? imageOf(show) : flyerOf(show)}" alt="" />
+        <span class="badge ${kind}">${phaseLabel(show)}</span>
+      </figure>
+      <p class="meta">${whenUnix(show.closesAt)} \xB7 ${esc(venue?.name || show.venue)}</p>
+      <h1>${esc(show.title)}</h1>
+      <p class="lead">${phaseNote(show)}</p>
+      <div class="kpis">
+        <article class="kpi"><p>Vendidos</p><b>${show.sold}</b><div class="bar"><span style="width:${pct}%"></span></div><small>${pct}% de ${show.capacity}</small></article>
+        ${kpi("Disponibles", show.inventory, "a\xFAn en taquilla")}
+        ${kpi("Entradas", show.admitted, "pasaron la puerta")}
+        ${kpi("Reembolsos", row.refunds, `de ${row.sales} ventas`)}
+        ${kpi("Cesiones", row.transfers, `${row.late} sin cesi\xF3n`)}
+        ${kpi("Custodia", pas(show.escrow), money(show.sold * show.priceMxn))}
+      </div>
+      <div class="row">
+        <a class="ghost" href="#/puerta">Puerta</a>
+        ${canFinalize ? `<button class="solid" id="finalize" type="button">Finalizar funci\xF3n</button>` : ""}
+        ${canWithdraw ? `<button class="ghost" id="withdraw" type="button">Retirar custodia</button>` : ""}
+        <button class="ghost" type="button" data-panel="modificar">Modificar</button>
+        ${isOrganizer(show) ? `<button class="ghost" type="button" data-panel="equipo">Colaboradores</button>` : ""}
+      </div>
+      <div id="panel"></div>
+      <p class="status" id="side"></p>
+    </section>`;
+  const panel = app.querySelector("#panel");
+  const paintPanel = () => {
+    if (state.panel === "modificar") panel.innerHTML = editForm(show);
+    else if (state.panel === "equipo") panel.innerHTML = teamForm(show);
+    else panel.innerHTML = "";
+    panel.querySelector("[data-save]")?.addEventListener("submit", (ev) => submitUpdate(ev, show.id, shows));
+    panel.querySelector("[data-invite]")?.addEventListener("submit", (ev) => submitEditor(ev, show.id, true));
+    panel.querySelector("[name=who]")?.addEventListener("input", (ev) => {
+      const note = panel.querySelector("#who-note");
+      const value = ev.target.value.trim();
+      if (!value) {
+        note.textContent = "";
+        return;
+      }
+      note.textContent = /^0x[0-9a-fA-F]{40}$/.test(value) ? "La direcci\xF3n cuadra." : "Todav\xEDa no parece una direcci\xF3n.";
+    });
+    panel.querySelectorAll("[data-drop]").forEach((button) => {
+      button.onclick = () => submitEditor(null, show.id, false, button.dataset.drop);
+    });
+  };
+  paintPanel();
+  app.querySelectorAll("[data-panel]").forEach((button) => {
     button.onclick = () => {
-      const id = Number(button.dataset.edit);
-      state.editing = state.editing === id ? 0 : id;
-      organizar();
+      state.panel = state.panel === button.dataset.panel ? "resumen" : button.dataset.panel;
+      paintPanel();
     };
   });
-  app.querySelectorAll("[data-save]").forEach((form) => {
-    form.onsubmit = (ev) => submitUpdate(ev, Number(form.dataset.save), shows);
+  app.querySelector("#finalize")?.addEventListener("click", () => {
+    act("finalize", [BigInt(show.id)], app.querySelector("#side"), () => tablero(show.id));
   });
-  app.querySelectorAll("[data-editor]").forEach((form) => {
-    form.onsubmit = (ev) => submitEditor(ev, Number(form.dataset.editor), true);
+  app.querySelector("#withdraw")?.addEventListener("click", () => {
+    act("withdraw", [BigInt(show.id)], app.querySelector("#side"), () => tablero(show.id));
   });
-  app.querySelectorAll("[data-drop]").forEach((button) => {
-    button.onclick = () => submitEditor(null, Number(button.dataset.event), false, button.dataset.drop);
-  });
-  app.querySelectorAll("[data-withdraw]").forEach((button) => {
-    button.onclick = () => act("withdraw", [BigInt(button.dataset.withdraw)], app.querySelector("#side"), () => organizar());
-  });
+}
+function editForm(show) {
+  const locked = show.sold > 0;
+  return `<form class="panel" data-save="${show.id}">
+    <label>T\xEDtulo <input name="title" required minlength="3" maxlength="120" value="${esc(show.title)}" /></label>
+    <label>Resumen <textarea name="summary" rows="3" maxlength="600">${esc(show.summary)}</textarea></label>
+    <label>Categor\xEDa <select name="category">${state.config.categories.map((cat) => `<option value="${esc(cat.slug)}" ${cat.slug === show.category ? "selected" : ""}>${esc(cat.name)}</option>`).join("")}</select></label>
+    <label>Recinto <select name="venue">${state.config.venues.map((venue) => `<option value="${esc(venue.slug)}" data-cap="${venue.capacity}" ${venue.slug === show.venue ? "selected" : ""}>${esc(venue.name)}</option>`).join("")}</select></label>
+    <label>Boletos <input name="capacity" type="number" min="${Math.max(1, show.sold)}" max="${show.venueCap}" value="${show.capacity}" required /></label>
+    <label>Precio de cara <span class="adorn"><span>$</span><input name="priceMxn" type="number" min="0" value="${show.priceMxn}" required /><span>MXN</span></span></label>
+    <label>Tope en la red <span class="adorn"><input name="pas" type="number" min="0" step="0.001" value="${Number(show.facePrice) / 1e18}" ${locked ? "disabled" : ""} /><span>PAS</span></span></label>
+    ${locked ? `<p class="meta">El tope en la red queda fijo porque ya hay boletos vendidos.</p>` : ""}
+    <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${localInput(show.closesAt)}" /></label>
+    <label>Cartel <input name="image" value="${esc(show.image)}" placeholder="https://\u2026" /></label>
+    <button class="solid" type="submit">Guardar en la red</button>
+  </form>`;
+}
+function teamForm(show) {
+  const editors = new Set((show.editors || []).map((who) => who.toLowerCase()));
+  const rows = [
+    ...(show.editors || []).map((who) => ({ who, role: "Modificar y puerta" })),
+    ...(show.doors || []).filter((who) => !editors.has(who.toLowerCase())).map((who) => ({ who, role: "Puerta" }))
+  ];
+  return `<form class="panel" data-invite="${show.id}">
+    <p class="meta">Quien modifica tambi\xE9n puede abrir la puerta. Quien est\xE1 solo en puerta no cambia el cartel ni el precio.</p>
+    <table class="team">
+      <thead><tr><th>Persona</th><th>Rol</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((row) => `<tr><td>${identicon(row.who)}<span>${shortAddress(row.who)}</span></td><td>${esc(row.role)}</td><td><button class="ghost" type="button" data-drop="${esc(row.who)}">Quitar</button></td></tr>`).join("") || `<tr><td colspan="3">Nadie m\xE1s en la lista.</td></tr>`}
+      </tbody>
+    </table>
+    <label>Direcci\xF3n <input name="who" placeholder="0x\u2026" required /></label>
+    <p class="meta" id="who-note"></p>
+    <label>Rol <select name="role"><option value="puerta">Puerta</option><option value="editor">Modificar y puerta</option></select></label>
+    <button class="solid" type="submit">Invitar colaborador</button>
+  </form>`;
 }
 var ADMIT_TAG = keccak256(toBytes("peranto:ticket:admit"));
 function parsePresent(raw) {
@@ -30838,6 +31076,10 @@ async function acceptPresent(raw, shows, status, verdict) {
       verdict.innerHTML = `<p class="warn">Este boleto no es de una funci\xF3n a tu cargo.</p>`;
       return false;
     }
+    if (show.finalized) {
+      verdict.innerHTML = `<p class="warn">Esa funci\xF3n ya finaliz\xF3. El pase qued\xF3 cerrado.</p>`;
+      return false;
+    }
     if (!active) {
       verdict.innerHTML = `<p class="warn">El boleto ${presented.passId} ya no est\xE1 vigente.</p>`;
       return false;
@@ -30868,7 +31110,7 @@ async function acceptPresent(raw, shows, status, verdict) {
 async function submitCreate(ev) {
   ev.preventDefault();
   const status = app.querySelector("#status");
-  const form = new FormData(ev.target);
+  const form = { get: (key) => state.draft?.[key] ?? "" };
   try {
     status.textContent = "Conectando Aura\u2026";
     const account = state.account || await connect();
@@ -30896,7 +31138,9 @@ async function submitCreate(ev) {
       ])
     );
     state.account = account;
-    location.hash = "#/";
+    state.step = 1;
+    state.draft = {};
+    location.hash = "#/organizar";
   } catch (error) {
     status.textContent = error.shortMessage || error.message;
   }
@@ -30933,8 +31177,8 @@ async function submitUpdate(ev, eventId, shows) {
         card2
       ])
     );
-    state.editing = 0;
-    organizar();
+    state.panel = "resumen";
+    tablero(eventId);
   } catch (error) {
     status.textContent = error.shortMessage || error.message;
   }
@@ -30945,8 +31189,21 @@ async function submitEditor(ev, eventId, allowed, who) {
   try {
     const address = getAddress(who || new FormData(ev.target).get("who"));
     status.textContent = allowed ? "Agregando a la lista\u2026" : "Quitando de la lista\u2026";
-    await send(tx("setEditor", [BigInt(eventId), address, allowed]));
-    organizar();
+    const role = ev ? new FormData(ev.target).get("role") : "";
+    const [isEditor, isDoor] = await Promise.all([
+      state.client.readContract({ address: deskAddress(), abi: abi2, functionName: "editor", args: [BigInt(eventId), address] }),
+      state.client.readContract({ address: deskAddress(), abi: abi2, functionName: "doorStaff", args: [BigInt(eventId), address] })
+    ]);
+    if (!allowed) {
+      if (isEditor) await send(tx("setEditor", [BigInt(eventId), address, false]));
+      if (isDoor) await send(tx("setDoor", [BigInt(eventId), address, false]));
+    } else if (role === "puerta") {
+      if (!isDoor) await send(tx("setDoor", [BigInt(eventId), address, true]));
+      if (isEditor) await send(tx("setEditor", [BigInt(eventId), address, false]));
+    } else if (!isEditor) {
+      await send(tx("setEditor", [BigInt(eventId), address, true]));
+    }
+    tablero(eventId);
   } catch (error) {
     status.textContent = error.shortMessage || error.message;
   }
