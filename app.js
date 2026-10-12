@@ -29909,6 +29909,10 @@ var abi2 = [
   { type: "function", name: "editor", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bool" }] },
   { type: "function", name: "doorStaff", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bool" }] },
   { type: "function", name: "finalize", stateMutability: "nonpayable", inputs: [{ name: "eventId", type: "uint256" }], outputs: [] },
+  { type: "function", name: "cancel", stateMutability: "nonpayable", inputs: [{ name: "eventId", type: "uint256" }, { name: "percent", type: "uint8" }], outputs: [] },
+  { type: "function", name: "claimRefund", stateMutability: "nonpayable", inputs: [{ name: "passId", type: "uint256" }], outputs: [] },
+  { type: "function", name: "cancelled", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "refundPercent", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint8" }] },
   {
     type: "function",
     name: "setDoor",
@@ -30167,6 +30171,8 @@ function explain(error) {
   if (text.toLowerCase().includes("credbound")) {
     return "Esta funci\xF3n ya qued\xF3 con otra credencial. Las siguientes compras usan la primera, hasta los 4 boletos.";
   }
+  if (text.includes("Cancelled()")) return "Esta funci\xF3n ya se elimin\xF3.";
+  if (text.includes("BadValue()")) return "Ese porcentaje no cabe en la custodia de la funci\xF3n.";
   return error?.shortMessage || error?.message || "No pude completar la operaci\xF3n.";
 }
 function asBytes32(value) {
@@ -30238,10 +30244,12 @@ async function loadShows() {
   const next = await state.client.readContract({ address: desk, abi: abi2, functionName: "nextEvent" });
   const shows = [];
   for (let id = 1n; id < next; id++) {
-    const [show, card2, admitted] = await Promise.all([
+    const [show, card2, admitted, isCancelled, percent] = await Promise.all([
       state.client.readContract({ address: desk, abi: abi2, functionName: "events", args: [id] }),
       state.client.readContract({ address: desk, abi: abi2, functionName: "cards", args: [id] }),
-      state.client.readContract({ address: desk, abi: abi2, functionName: "admittedCount", args: [id] })
+      state.client.readContract({ address: desk, abi: abi2, functionName: "admittedCount", args: [id] }),
+      state.client.readContract({ address: desk, abi: abi2, functionName: "cancelled", args: [id] }),
+      state.client.readContract({ address: desk, abi: abi2, functionName: "refundPercent", args: [id] })
     ]);
     const exists = show.exists ?? show[10];
     if (!exists) continue;
@@ -30267,7 +30275,9 @@ async function loadShows() {
       admitted: Number(admitted),
       editors: [],
       doors: [],
-      finalized: Boolean(show.finalized ?? show[11])
+      finalized: Boolean(show.finalized ?? show[11]),
+      cancelled: Boolean(isCancelled),
+      refundPercent: Number(percent)
     });
   }
   return shows;
@@ -30355,6 +30365,7 @@ function isStaff(show) {
 var GRACE = 30 * 60;
 function phase(show) {
   const now = Date.now() / 1e3;
+  if (show.cancelled) return "eliminado";
   if (show.finalized) return "finalizado";
   if (show.opensAt && now < show.opensAt) return "espera";
   if (!show.closesAt || now < show.closesAt) return "publicado";
@@ -30362,10 +30373,11 @@ function phase(show) {
   return "cerrado";
 }
 function phaseLabel(show) {
-  return { espera: "Pr\xF3xima", publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
+  return { eliminado: "Eliminada", espera: "Pr\xF3xima", publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
 }
 function phaseNote(show) {
   const kind = phase(show);
+  if (kind === "eliminado") return `La funci\xF3n se elimin\xF3. El reembolso es del ${show.refundPercent}% de lo pagado.`;
   if (kind === "espera") return `La venta abre el ${whenUnix(show.opensAt)}.`;
   if (kind === "publicado") return "Antes de la funci\xF3n. La venta est\xE1 abierta y cada boleto se puede ceder una vez.";
   if (kind === "encurso") return "La funci\xF3n ya empez\xF3. Se puede vender 30 minutos m\xE1s. Ese boleto no se cede.";
@@ -30485,6 +30497,7 @@ async function evento(id) {
 }
 function buyBox(show) {
   const kind = phase(show);
+  if (kind === "eliminado") return `<p class="meta">Esta funci\xF3n se elimin\xF3. El reembolso es del ${show.refundPercent}%.</p>`;
   if (kind === "espera") return `<p class="meta">La venta abre el ${whenUnix(show.opensAt)}.</p><button class="solid" type="button" disabled>A\xFAn no abre</button>`;
   if (kind === "finalizado" || kind === "cerrado") return `<button class="solid" type="button" disabled>Venta cerrada</button>`;
   const max = Math.min(4, show.inventory);
@@ -30562,7 +30575,7 @@ function recintos() {
 async function recinto(slug) {
   const venue = venueOf(slug);
   if (!venue) return cartelera();
-  const shows = (await loadShows()).filter((show) => show.venue === slug);
+  const shows = (await loadShows()).filter((show) => show.venue === slug && phase(show) !== "eliminado");
   app.innerHTML = `
     <section class="page">
       <p class="meta">${esc(venue.city)} \xB7 ${esc(venue.kind)}</p>
@@ -30573,15 +30586,18 @@ async function recinto(slug) {
 }
 function ticketView(pass, show) {
   const entered = pass.status === "entro";
-  const closed = show && (phase(show) === "finalizado" || phase(show) === "cerrado");
+  const dropped = Boolean(show?.cancelled);
+  const closed = show && (dropped || phase(show) === "finalizado" || phase(show) === "cerrado");
   const once = !closed && !pass.late && pass.hops === 0 && pass.status === "activo";
-  const note = show?.finalized ? "La funci\xF3n finaliz\xF3. Este pase qued\xF3 cerrado." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
+  const note = dropped ? show.refundPercent > 0 ? `La funci\xF3n se elimin\xF3. Puedes cobrar el ${show.refundPercent}% de lo pagado.` : "La funci\xF3n se elimin\xF3. No hay reembolso." : show?.finalized ? "La funci\xF3n finaliz\xF3. Este pase qued\xF3 cerrado." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
+  const refund = dropped && pass.status === "activo" ? `<button class="solid" type="button" data-refund="${pass.passId}">${show.refundPercent > 0 ? "Cobrar reembolso" : "Cerrar boleto"}</button>` : "";
   return `<article class="ticket">
     <img src="${imageOf(show)}" alt="" />
     <div>
       <h2>${esc(show?.title || "Boleto")}</h2>
       <p class="meta">${show ? whenUnix(show.closesAt) : ""} \xB7 ${note}</p>
       <div class="row">
+        ${refund}
         ${once ? `<button class="ghost" type="button" data-offer="${pass.passId}" data-event="${pass.eventId}">Ceder una vez</button>` : ""}
         ${!closed && pass.status === "activo" ? `<button class="ghost" type="button" data-return="${pass.passId}">Devolver a la taquilla</button>` : ""}
       </div>
@@ -30617,6 +30633,9 @@ async function boletos() {
   const status = app.querySelector("#status");
   app.querySelectorAll("[data-return]").forEach((button) => {
     button.onclick = () => act("returnPass", [BigInt(button.dataset.return)], status, () => boletos());
+  });
+  app.querySelectorAll("[data-refund]").forEach((button) => {
+    button.onclick = () => act("claimRefund", [BigInt(button.dataset.refund)], status, () => boletos());
   });
   app.querySelectorAll("[data-offer]").forEach((button) => {
     button.onclick = () => offerPass(button.dataset.offer, button.dataset.event, status);
@@ -30940,8 +30959,9 @@ async function tablero(id) {
   const row = state.ledger.get(show.id) || { sales: 0, refunds: 0, transfers: 0, late: 0 };
   const pct = show.capacity ? Math.min(100, Math.round(show.sold / show.capacity * 100)) : 0;
   const kind = phase(show);
-  const canFinalize = isOrganizer(show) && !show.finalized && show.closesAt && Date.now() / 1e3 >= show.closesAt;
-  const canWithdraw = isOrganizer(show) && show.escrow > 0n && show.closesAt && Date.now() / 1e3 >= show.closesAt;
+  const canFinalize = isOrganizer(show) && !show.cancelled && !show.finalized && show.closesAt && Date.now() / 1e3 >= show.closesAt;
+  const canWithdraw = isOrganizer(show) && show.escrow > 0n && (show.cancelled || show.closesAt && Date.now() / 1e3 >= show.closesAt);
+  const canCancel = isOrganizer(show) && !show.cancelled && !show.finalized;
   app.innerHTML = `
     <section class="page">
       <p class="meta"><a href="#/organizar">Mis funciones</a></p>
@@ -30963,8 +30983,9 @@ async function tablero(id) {
       <div class="row">
         <a class="ghost" href="#/puerta">Puerta</a>
         ${canFinalize ? `<button class="solid" id="finalize" type="button">Finalizar funci\xF3n</button>` : ""}
-        ${canWithdraw ? `<button class="ghost" id="withdraw" type="button">Retirar custodia</button>` : ""}
-        <button class="ghost" type="button" data-panel="modificar">Modificar</button>
+        ${canWithdraw ? `<button class="ghost" id="withdraw" type="button">${show.cancelled ? "Retirar lo que queda" : "Retirar custodia"}</button>` : ""}
+        ${show.cancelled ? "" : `<button class="ghost" type="button" data-panel="modificar">Modificar</button>`}
+        ${canCancel ? `<button class="ghost" type="button" data-panel="eliminar">Eliminar</button>` : ""}
         ${isOrganizer(show) ? `<button class="ghost" type="button" data-panel="equipo">Colaboradores</button>` : ""}
       </div>
       <div id="panel"></div>
@@ -30974,8 +30995,10 @@ async function tablero(id) {
   const paintPanel = () => {
     if (state.panel === "modificar") panel.innerHTML = editForm(show);
     else if (state.panel === "equipo") panel.innerHTML = teamForm(show);
+    else if (state.panel === "eliminar") panel.innerHTML = cancelForm(show);
     else panel.innerHTML = "";
     panel.querySelector("[data-save]")?.addEventListener("submit", (ev) => submitUpdate(ev, show.id, shows));
+    panel.querySelector("[data-cancel]")?.addEventListener("submit", (ev) => submitCancel(ev, show.id));
     panel.querySelector("[data-invite]")?.addEventListener("submit", (ev) => submitEditor(ev, show.id, true));
     panel.querySelector("[name=who]")?.addEventListener("input", (ev) => {
       const note = panel.querySelector("#who-note");
@@ -31003,6 +31026,13 @@ async function tablero(id) {
   app.querySelector("#withdraw")?.addEventListener("click", () => {
     act("withdraw", [BigInt(show.id)], app.querySelector("#side"), () => tablero(show.id));
   });
+}
+function cancelForm(show) {
+  return `<form class="panel" data-cancel="${show.id}">
+    <p class="meta">La funci\xF3n sale de la cartelera. El porcentaje es la parte de lo pagado que regresa. Si el boleto se cedi\xF3, quien lo tiene firma el cobro y en esa misma firma sale la parte de quien compr\xF3. El resto queda en tu custodia.</p>
+    <label>Reembolso <span class="adorn"><input name="percent" type="number" min="0" max="100" value="100" required /><span>%</span></span></label>
+    <button class="solid" type="submit">Eliminar funci\xF3n</button>
+  </form>`;
 }
 function editForm(show) {
   const locked = show.sold > 0;
@@ -31236,6 +31266,20 @@ async function submitCreate(ev) {
     location.hash = "#/organizar";
   } catch (error) {
     status.textContent = error.shortMessage || error.message;
+  }
+}
+async function submitCancel(ev, eventId) {
+  ev.preventDefault();
+  const status = app.querySelector("#side");
+  const percent = Number(new FormData(ev.target).get("percent"));
+  try {
+    if (!Number.isInteger(percent) || percent < 0 || percent > 100) throw new Error("El reembolso va de 0 a 100.");
+    status.textContent = "Eliminando la funci\xF3n\u2026";
+    await send(tx("cancel", [BigInt(eventId), percent]));
+    state.panel = "resumen";
+    tablero(eventId);
+  } catch (error) {
+    status.textContent = explain(error);
   }
 }
 async function submitUpdate(ev, eventId, shows) {

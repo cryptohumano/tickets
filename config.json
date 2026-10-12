@@ -1,10 +1,10 @@
 {
-  "address": "0x3FD92F13f489Ab8551720079A05cB919E7665d42",
-  "desk": "0x3FD92F13f489Ab8551720079A05cB919E7665d42",
+  "address": "0x0cef319F4c60B2Be97D8a98E81e1bc3F4c14AF1b",
+  "desk": "0x0cef319F4c60B2Be97D8a98E81e1bc3F4c14AF1b",
   "chainId": 420420417,
   "rpc": "https://eth-rpc-testnet.polkadot.io/",
   "deployer": "0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",
-  "fromBlock": 14334573,
+  "fromBlock": 14335285,
   "venues": [
     {
       "slug": "foro-sol",

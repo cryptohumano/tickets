@@ -185,7 +185,7 @@ a.solid, a.link { text-decoration: none; display: inline-block; }
 .flyer { position: relative; margin: 0 0 12px; }
 .badge { display: inline-block; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: #e7f4f8; color: var(--deep); }
 .badge.encurso, .badge.espera { background: #f3e6c4; color: #6a4b12; }
-.badge.cerrado, .badge.finalizado { background: #ece7e1; color: var(--muted); }
+.badge.cerrado, .badge.finalizado, .badge.eliminado { background: #ece7e1; color: var(--muted); }
 .flyer .badge { position: absolute; left: 12px; top: 12px; }
 .wizard { display: flex; gap: 8px; flex-wrap: wrap; padding: 0; margin: 0 0 16px; list-style: none; }
 .wizard li { padding: 6px 10px; border-radius: 999px; color: var(--muted); background: #efeae2; font-size: 14px; }
