@@ -30757,9 +30757,18 @@ async function claim(passId, byId, status) {
   }
 }
 function localInput(unix) {
+  if (!unix) return "";
   const date = new Date(Number(unix) * 1e3);
   const pad4 = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad4(date.getMonth() + 1)}-${pad4(date.getDate())}T${pad4(date.getHours())}:${pad4(date.getMinutes())}`;
+}
+function saleOpens(raw, starts) {
+  const text = String(raw || "").trim();
+  if (!text) return 0n;
+  const at = Math.floor(new Date(text).getTime() / 1e3);
+  if (!at) throw new Error("La fecha de venta no cuadra.");
+  if (at >= starts) throw new Error("La venta tiene que abrir antes de que empiece la funci\xF3n.");
+  return BigInt(at);
 }
 function cardFrom(form, venue) {
   const image = String(form.get("image") || "").trim();
@@ -30893,7 +30902,9 @@ function stepInfo(draft) {
     <label>Resumen <textarea name="summary" rows="3" maxlength="600" placeholder="Qu\xE9 va a pasar, en una frase.">${esc(draft.summary || "")}</textarea></label>
     <label>Categor\xEDa <select name="category">${state.config.categories.map((cat) => `<option value="${esc(cat.slug)}" ${cat.slug === draft.category ? "selected" : ""}>${esc(cat.name)}</option>`).join("")}</select></label>
     <label>Recinto <select name="venue" id="venue">${state.config.venues.map((venue) => `<option value="${esc(venue.slug)}" data-cap="${venue.capacity}" ${venue.slug === draft.venue ? "selected" : ""}>${esc(venue.name)} \xB7 ${venue.capacity.toLocaleString("es-MX")}</option>`).join("")}</select></label>
-    <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${esc(draft.startsAt || "")}" /></label>
+    <label>Fecha y hora de la funci\xF3n <input name="startsAt" type="datetime-local" required value="${esc(draft.startsAt || "")}" /></label>
+    <label>La venta abre <input name="opensAt" type="datetime-local" value="${esc(draft.opensAt || "")}" /></label>
+    <p class="meta">Si dejas vac\xEDa la venta, los boletos se pueden comprar desde que publicas la funci\xF3n.</p>
     <label>Cartel <input name="image" value="${esc(draft.image || "")}" placeholder="https://\u2026 o /media/cartel.svg" /></label>`;
 }
 function stepMoney(draft) {
@@ -30911,6 +30922,7 @@ function stepPublish(draft) {
       <p class="meta">As\xED queda publicada</p>
       <h2>${esc(draft.title || "Sin t\xEDtulo")}</h2>
       <p>${esc(venue?.name || draft.venue || "")} \xB7 ${esc(draft.startsAt || "")}</p>
+      <p class="meta">${draft.opensAt ? `La venta abre el ${esc(draft.opensAt)}.` : "La venta abre al publicar la funci\xF3n."}</p>
       <p>${esc(draft.capacity || "0")} boletos \xB7 ${money(Number(draft.priceMxn) || 0)} \xB7 ${esc(draft.pas || "0")} PAS</p>
       <p class="meta">Despu\xE9s de publicar puedes invitar a quien modifica la funci\xF3n y a quien solo abre la puerta. La venta sigue 30 minutos despu\xE9s de empezar; ese boleto no se cede. Puedes finalizar cuando la funci\xF3n ya comenz\xF3.</p>
     </div>`;
@@ -31003,7 +31015,9 @@ function editForm(show) {
     <label>Precio de cara <span class="adorn"><span>$</span><input name="priceMxn" type="number" min="0" value="${show.priceMxn}" required /><span>MXN</span></span></label>
     <label>Tope en la red <span class="adorn"><input name="pas" type="number" min="0" step="0.001" value="${Number(show.facePrice) / 1e18}" ${locked ? "disabled" : ""} /><span>PAS</span></span></label>
     ${locked ? `<p class="meta">El tope en la red queda fijo porque ya hay boletos vendidos.</p>` : ""}
-    <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${localInput(show.closesAt)}" /></label>
+    <label>Fecha y hora de la funci\xF3n <input name="startsAt" type="datetime-local" required value="${localInput(show.closesAt)}" /></label>
+    <label>La venta abre <input name="opensAt" type="datetime-local" value="${localInput(show.opensAt)}" /></label>
+    <p class="meta">Vac\xEDo quiere decir que la venta ya est\xE1 abierta.</p>
     <label>Cartel <input name="image" value="${esc(show.image)}" placeholder="https://\u2026" /></label>
     <button class="solid" type="submit">Guardar en la red</button>
   </form>`;
@@ -31208,7 +31222,7 @@ async function submitCreate(ev) {
       tx("createEvent", [
         capacity,
         face,
-        BigInt(Math.max(0, starts - 60 * 60 * 24 * 30)),
+        saleOpens(form.get("opensAt"), starts),
         BigInt(starts),
         keccak256(toBytes(venue.slug)),
         keccak256(toBytes(card2.categorySlug)),
@@ -31247,7 +31261,7 @@ async function submitUpdate(ev, eventId, shows) {
         {
           capacity,
           facePrice: face,
-          opensAt: BigInt(Math.max(0, starts - 60 * 60 * 24 * 30)),
+          opensAt: saleOpens(form.get("opensAt"), starts),
           closesAt: BigInt(starts),
           venueId: keccak256(toBytes(venue.slug)),
           categoryId: keccak256(toBytes(card2.categorySlug)),
