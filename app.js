@@ -19799,7 +19799,7 @@ init_keccak256();
 var app = document.querySelector("#app");
 var walletBtn = document.querySelector("#wallet");
 var OFFERS = "cigo.tickets.offers.v1";
-var state = { account: "", config: null, client: null, category: "", editing: 0, door: 0, notice: "" };
+var state = { account: "", config: null, client: null, category: "", editing: 0, notice: "" };
 var cardTuple = [
   { name: "title", type: "string" },
   { name: "summary", type: "string" },
@@ -19847,6 +19847,7 @@ var abi2 = [
     outputs: cardTuple.map((item) => ({ name: item.name, type: item.type }))
   },
   { type: "function", name: "admittedCount", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint32" }] },
+  { type: "function", name: "heldCount", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "bytes32" }], outputs: [{ type: "uint8" }] },
   { type: "function", name: "editorsOf", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address[]" }] },
   { type: "function", name: "selfAttest", stateMutability: "nonpayable", inputs: [], outputs: [] },
   {
@@ -20179,6 +20180,7 @@ function route() {
   if (parts[0] === "evento") return evento(Number(parts[1]));
   if (parts[0] === "recintos") return parts[1] ? recinto(parts[1]) : recintos();
   if (parts[0] === "boletos") return boletos();
+  if (parts[0] === "puerta") return puerta(Number(parts[1]) || 0);
   if (parts[0] === "organizar") return organizar();
   return cartelera();
 }
@@ -20238,29 +20240,69 @@ async function evento(id) {
           <ol class="steps">
             <li>Conecta Aura en Paseo.</li>
             <li>Activa la credencial de demostraci\xF3n. La prueba no muestra tu nombre.</li>
-            <li>Compra. El boleto queda a tu identidad.</li>
+            <li>Elige cu\xE1ntos boletos. Cada uno pide su firma y queda a tu identidad.</li>
           </ol>
-          <button class="solid" id="buy" type="button">Comprar con Aura</button>
+          ${buyBox(show)}
           <p class="status" id="status"></p>
         </div>
       </div>
     </article>`;
   const status = app.querySelector("#status");
-  app.querySelector("#buy").onclick = async () => {
-    try {
-      status.textContent = "Conectando Aura\u2026";
-      const account = state.account || await connect();
-      status.textContent = "Activando la credencial de demostraci\xF3n\u2026";
-      await send(tx("selfAttest", []));
-      status.textContent = "Armando la prueba\u2026";
-      const proof = await proofFor(account, show.id);
-      status.textContent = "Firmando la compra\u2026";
-      await send(tx("buy", [BigInt(show.id), proof.credHash, proof.chainNullifier, proof.proof], show.facePrice));
-      location.hash = "#/boletos";
-    } catch (error) {
-      status.textContent = error.shortMessage || error.message;
-    }
+  const qty = app.querySelector("#qty");
+  const total = app.querySelector("#total");
+  const paintTotal = () => {
+    if (!qty || !total) return;
+    const n = Number(qty.value) || 1;
+    total.textContent = `${money(show.priceMxn * n)} \xB7 ${pas(show.facePrice * BigInt(n))}`;
   };
+  qty?.addEventListener("change", paintTotal);
+  paintTotal();
+  app.querySelector("#buy")?.addEventListener("click", () => buyShow(show, Number(qty?.value) || 1, status));
+}
+function buyBox(show) {
+  const max = Math.min(4, show.inventory);
+  if (max < 1) return `<button class="solid" type="button" disabled>Agotado</button>`;
+  const options = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+  return `<label>Cu\xE1ntos boletos <select id="qty">${options}</select></label>
+    <p class="meta" id="total"></p>
+    <button class="solid" id="buy" type="button">Comprar con Aura</button>`;
+}
+async function heldBy(account, eventId) {
+  const person = keccak256(
+    encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [getAddress(account), BigInt(eventId)])
+  );
+  const held = await state.client.readContract({
+    address: deskAddress(),
+    abi: abi2,
+    functionName: "heldCount",
+    args: [BigInt(eventId), person]
+  });
+  return Number(held);
+}
+async function buyShow(show, wanted, status) {
+  const button = app.querySelector("#buy");
+  try {
+    if (button) button.disabled = true;
+    status.textContent = "Conectando Aura\u2026";
+    const account = state.account || await connect();
+    const held = await heldBy(account, show.id);
+    const room = Math.max(0, 4 - held);
+    const count = Math.min(wanted, room, show.inventory);
+    if (count < 1) throw new Error("Esta identidad ya tiene los 4 boletos de esta funci\xF3n.");
+    if (count < wanted) status.textContent = `Puedes llevar ${count}. Esta identidad ya tiene ${held}.`;
+    status.textContent = "Activando la credencial de demostraci\xF3n\u2026";
+    await send(tx("selfAttest", []));
+    status.textContent = "Armando la prueba\u2026";
+    const proof = await proofFor(account, show.id);
+    for (let n = 1; n <= count; n++) {
+      status.textContent = `Firmando el boleto ${n} de ${count}\u2026`;
+      await send(tx("buy", [BigInt(show.id), proof.credHash, proof.chainNullifier, proof.proof], show.facePrice));
+    }
+    location.hash = "#/boletos";
+  } catch (error) {
+    status.textContent = error.shortMessage || error.message;
+    if (button) button.disabled = false;
+  }
 }
 function recintos() {
   app.innerHTML = `
@@ -20484,7 +20526,7 @@ async function organizar() {
                   ${metrics(show)}
                   <div class="row">
                     <button class="ghost" type="button" data-edit="${show.id}">${state.editing === show.id ? "Cerrar" : "Modificar"}</button>
-                    <button class="ghost" type="button" data-door="${show.id}">Puerta</button>
+                    <a class="ghost" href="#/puerta/${show.id}">Puerta</a>
                     ${isOrganizer(show) && show.escrow > 0n && (show.closesAt === 0 || Date.now() / 1e3 >= show.closesAt) ? `<button class="ghost" type="button" data-withdraw="${show.id}">Retirar custodia</button>` : ""}
                   </div>
                   ${state.editing === show.id ? `<form class="panel" data-save="${show.id}">
@@ -20500,7 +20542,6 @@ async function organizar() {
                           <label>Cartel <input name="image" value="${esc(show.image)}" /></label>
                           <button class="solid" type="submit">Guardar en la red</button>
                         </form>` : ""}
-                  ${state.door === show.id ? `<div class="panel" id="door"><p class="meta">Cargando boletos\u2026</p></div>` : ""}
                   ${isOrganizer(show) ? `<form class="panel" data-editor="${show.id}">
                           <p class="meta">Lista de quienes pueden modificar y marcar la entrada.</p>
                           ${(show.editors || []).map((who) => `<p class="row"><span>${esc(who)}</span> <button class="ghost" type="button" data-drop="${esc(who)}" data-event="${show.id}">Quitar</button></p>`).join("") || '<p class="meta">Nadie m\xE1s.</p>'}
@@ -20530,13 +20571,6 @@ async function organizar() {
       organizar();
     };
   });
-  app.querySelectorAll("[data-door]").forEach((button) => {
-    button.onclick = () => {
-      const id = Number(button.dataset.door);
-      state.door = state.door === id ? 0 : id;
-      organizar();
-    };
-  });
   app.querySelectorAll("[data-save]").forEach((form) => {
     form.onsubmit = (ev) => submitUpdate(ev, Number(form.dataset.save), shows);
   });
@@ -20549,16 +20583,145 @@ async function organizar() {
   app.querySelectorAll("[data-withdraw]").forEach((button) => {
     button.onclick = () => act("withdraw", [BigInt(button.dataset.withdraw)], app.querySelector("#side"), () => organizar());
   });
-  if (state.door) paintDoor(state.door);
 }
-async function paintDoor(eventId) {
-  const door = app.querySelector("#door");
-  if (!door) return;
-  const passes = (await loadPasses()).filter((pass) => pass.eventId === eventId && pass.status === "activo");
-  door.innerHTML = passes.length ? passes.map((pass) => `<p><button class="ghost" type="button" data-admit="${pass.passId}">Entrada del boleto ${pass.passId}</button></p>`).join("") : "<p>Esta funci\xF3n no tiene boletos activos.</p>";
-  door.querySelectorAll("[data-admit]").forEach((button) => {
-    button.onclick = () => act("admit", [BigInt(button.dataset.admit)], app.querySelector("#side"), () => organizar());
+function passCode(raw) {
+  const text = String(raw || "").trim();
+  const qr = text.match(/cigo:boleto:(\d+)/i);
+  if (qr) return Number(qr[1]);
+  return /^\d+$/.test(text) ? Number(text) : 0;
+}
+function shortAddress(value) {
+  const text = String(value || "");
+  if (!text.startsWith("0x") || text.length < 10) return "sin titular";
+  return `${text.slice(0, 6)}\u2026${text.slice(-4)}`;
+}
+async function puerta(eventId) {
+  if (!state.account) {
+    app.innerHTML = `<section class="page"><h1>Puerta</h1><p class="lead">Conecta Aura con la cuenta que cre\xF3 la funci\xF3n, o con alguien de su lista. Aqu\xED se revisa el c\xF3digo y se marca la entrada.</p><button class="solid" id="go" type="button">Conectar Aura</button></section>`;
+    app.querySelector("#go").onclick = async () => {
+      await connect();
+      puerta(eventId);
+    };
+    return;
+  }
+  const shows = await loadShows();
+  await loadEditors(shows);
+  const mine = shows.filter((show) => isStaff(show));
+  if (!mine.length) {
+    app.innerHTML = `<section class="page"><h1>Puerta</h1><p class="lead">Esta cuenta no organiza ninguna funci\xF3n ni est\xE1 en una lista de acceso.</p></section>`;
+    return;
+  }
+  const chosen = mine.find((show) => show.id === eventId) || mine[0];
+  const passes = (await loadPasses()).filter((pass) => pass.eventId === chosen.id);
+  const waiting = passes.filter((pass) => pass.status === "activo");
+  const entered = passes.filter((pass) => pass.status === "entro");
+  app.innerHTML = `
+    <section class="page">
+      <h1>Puerta</h1>
+      <p class="lead">Revisa el c\xF3digo que muestra CiGo, <span class="meta">cigo:boleto:\u2026</span>, y marca la entrada una sola vez. Solo quien cre\xF3 la funci\xF3n, o est\xE1 en su lista, puede hacerlo.</p>
+      <label>Funci\xF3n
+        <select id="show">${mine.map((show) => `<option value="${show.id}" ${show.id === chosen.id ? "selected" : ""}>${esc(show.title)}</option>`).join("")}</select>
+      </label>
+      <form id="check" class="panel">
+        <label>C\xF3digo del boleto <input name="code" placeholder="cigo:boleto:12 o el n\xFAmero" required /></label>
+        <div class="row">
+          <button class="solid" type="submit">Revisar</button>
+          <button class="ghost" id="scan" type="button">Leer c\xF3digo</button>
+        </div>
+        <video id="camera" hidden playsinline></video>
+        <div id="verdict"></div>
+        <p class="status" id="status"></p>
+      </form>
+      <div class="metrics">
+        <p class="metric"><b>${waiting.length}</b> por entrar</p>
+        <p class="metric"><b>${entered.length}</b> ya entraron</p>
+        <p class="metric"><b>${chosen.admitted}</b> marcas en la red</p>
+      </div>
+      <h2>Por entrar</h2>
+      ${waiting.map((pass) => `<article class="ticket plain"><div><h2>Boleto ${pass.passId}</h2><p class="meta">${esc(shortAddress(pass.holder))} \xB7 ${pass.hops === 0 ? "primera mano" : "cesi\xF3n"}</p><button class="solid" type="button" data-admit="${pass.passId}">Marcar entrada</button></div></article>`).join("") || "<p>No hay boletos activos.</p>"}
+      <h2>Ya entraron</h2>
+      ${entered.map((pass) => `<article class="ticket plain"><div><h2>Boleto ${pass.passId}</h2><p class="meta">${esc(shortAddress(pass.holder))}</p></div></article>`).join("") || "<p>Todav\xEDa no entra nadie.</p>"}
+    </section>`;
+  const status = app.querySelector("#status");
+  if (!("BarcodeDetector" in window)) app.querySelector("#scan").hidden = true;
+  app.querySelector("#show").onchange = () => {
+    location.hash = `#/puerta/${app.querySelector("#show").value}`;
+  };
+  app.querySelector("#check").onsubmit = (ev) => {
+    ev.preventDefault();
+    reviewPass(chosen, passCode(new FormData(ev.target).get("code")), passes, status);
+  };
+  app.querySelector("#scan").onclick = () => scanPass(status, (code) => reviewPass(chosen, code, passes, status));
+  app.querySelectorAll("[data-admit]").forEach((button) => {
+    button.onclick = () => admitPass(Number(button.dataset.admit), chosen.id, status);
   });
+}
+function reviewPass(show, passId, passes, status) {
+  const box = app.querySelector("#verdict");
+  const pass = passes.find((item) => item.passId === passId);
+  if (!passId || !pass) {
+    box.innerHTML = `<p class="warn">Ese c\xF3digo no corresponde a un boleto de esta funci\xF3n.</p>`;
+    return;
+  }
+  if (pass.eventId !== show.id) {
+    box.innerHTML = `<p class="warn">El boleto ${pass.passId} es de otra funci\xF3n.</p>`;
+    return;
+  }
+  if (pass.status === "devuelto") {
+    box.innerHTML = `<p class="warn">El boleto ${pass.passId} volvi\xF3 a la taquilla. No entra.</p>`;
+    return;
+  }
+  if (pass.status === "entro") {
+    box.innerHTML = `<p class="warn">El boleto ${pass.passId} ya entr\xF3. ${esc(shortAddress(pass.holder))}.</p>`;
+    return;
+  }
+  box.innerHTML = `<p>Boleto ${pass.passId} v\xE1lido. ${esc(shortAddress(pass.holder))} \xB7 ${pass.hops === 0 ? "primera mano" : "cesi\xF3n"}.</p><button class="solid" id="let" type="button">Marcar entrada</button>`;
+  app.querySelector("#let").onclick = () => admitPass(pass.passId, show.id, status);
+  status.textContent = "";
+}
+async function admitPass(passId, eventId, status) {
+  try {
+    status.textContent = `Marcando la entrada del boleto ${passId}\u2026`;
+    await send(tx("admit", [BigInt(passId)]));
+    const next = `#/puerta/${eventId}`;
+    if (location.hash === next) puerta(eventId);
+    else location.hash = next;
+  } catch (error) {
+    status.textContent = error.shortMessage || error.message;
+  }
+}
+async function scanPass(status, onCode) {
+  const video = app.querySelector("#camera");
+  if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) {
+    status.textContent = "Este navegador no lee la c\xE1mara. Escribe el n\xFAmero del boleto.";
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    video.hidden = false;
+    await video.play();
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    const started = Date.now();
+    while (Date.now() - started < 2e4) {
+      const codes = await detector.detect(video);
+      const hit = codes.map((code) => passCode(code.rawValue)).find(Boolean);
+      if (hit) {
+        onCode(hit);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  } catch (error) {
+    status.textContent = error.message || "No se pudo usar la c\xE1mara.";
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+    if (video) {
+      video.hidden = true;
+      video.srcObject = null;
+    }
+  }
 }
 async function submitCreate(ev) {
   ev.preventDefault();
