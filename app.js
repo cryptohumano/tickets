@@ -29903,6 +29903,7 @@ var abi2 = [
   },
   { type: "function", name: "admittedCount", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint32" }] },
   { type: "function", name: "heldCount", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "bytes32" }], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "credOf", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bytes32" }] },
   { type: "function", name: "editorsOf", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address[]" }] },
   { type: "function", name: "doorsOf", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "address[]" }] },
   { type: "function", name: "editor", stateMutability: "view", inputs: [{ type: "uint256" }, { type: "address" }], outputs: [{ type: "bool" }] },
@@ -30149,14 +30150,24 @@ function tx(name, args, value = 0n) {
     value: hexWei(value)
   };
 }
-function personProof(account, eventId, credHash) {
+function personProof(_account, eventId, credHash) {
   const nullifier = keccak256(
     encodeAbiParameters(
-      [{ type: "address" }, { type: "uint256" }],
-      [getAddress(account), BigInt(eventId)]
+      [{ type: "bytes32" }, { type: "uint256" }],
+      [credHash, BigInt(eventId)]
     )
   );
   return { credHash, chainNullifier: nullifier, proof: nullifier };
+}
+function explain(error) {
+  const text = `${error?.shortMessage || ""} ${error?.message || ""} ${error?.data || ""}`;
+  if (text.includes("0x86997fcd") || text.includes("Window()")) {
+    return "La venta no est\xE1 abierta: todav\xEDa no llega la fecha, o ya pas\xF3 la media hora despu\xE9s de empezar.";
+  }
+  if (text.toLowerCase().includes("credbound")) {
+    return "Esta funci\xF3n ya qued\xF3 con otra credencial. Las siguientes compras usan la primera, hasta los 4 boletos.";
+  }
+  return error?.shortMessage || error?.message || "No pude completar la operaci\xF3n.";
 }
 function asBytes32(value) {
   const hex = String(value || "").toLowerCase();
@@ -30345,15 +30356,17 @@ var GRACE = 30 * 60;
 function phase(show) {
   const now = Date.now() / 1e3;
   if (show.finalized) return "finalizado";
+  if (show.opensAt && now < show.opensAt) return "espera";
   if (!show.closesAt || now < show.closesAt) return "publicado";
   if (now <= show.closesAt + GRACE) return "encurso";
   return "cerrado";
 }
 function phaseLabel(show) {
-  return { publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
+  return { espera: "Pr\xF3xima", publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
 }
 function phaseNote(show) {
   const kind = phase(show);
+  if (kind === "espera") return `La venta abre el ${whenUnix(show.opensAt)}.`;
   if (kind === "publicado") return "Antes de la funci\xF3n. La venta est\xE1 abierta y cada boleto se puede ceder una vez.";
   if (kind === "encurso") return "La funci\xF3n ya empez\xF3. Se puede vender 30 minutos m\xE1s. Ese boleto no se cede.";
   if (kind === "cerrado") return "Despu\xE9s de la funci\xF3n. La venta cerr\xF3. Finalizar apaga la puerta y las devoluciones.";
@@ -30410,7 +30423,7 @@ function card(show) {
 }
 async function cartelera() {
   const shows = await loadShows();
-  const open = shows.filter((show) => phase(show) === "publicado" || phase(show) === "encurso");
+  const open = shows.filter((show) => ["espera", "publicado", "encurso"].includes(phase(show)));
   const filtered = state.category ? open.filter((show) => show.category === state.category) : open;
   app.innerHTML = `
     <section class="hero">
@@ -30472,6 +30485,7 @@ async function evento(id) {
 }
 function buyBox(show) {
   const kind = phase(show);
+  if (kind === "espera") return `<p class="meta">La venta abre el ${whenUnix(show.opensAt)}.</p><button class="solid" type="button" disabled>A\xFAn no abre</button>`;
   if (kind === "finalizado" || kind === "cerrado") return `<button class="solid" type="button" disabled>Venta cerrada</button>`;
   const max = Math.min(4, show.inventory);
   if (max < 1) return `<button class="solid" type="button" disabled>Agotado</button>`;
@@ -30483,9 +30497,9 @@ function buyBox(show) {
     ${late}
     <button class="solid" id="buy" type="button">Comprar con Aura</button>`;
 }
-async function heldBy(account, eventId) {
+async function heldBy(credHash, eventId) {
   const person = keccak256(
-    encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [getAddress(account), BigInt(eventId)])
+    encodeAbiParameters([{ type: "bytes32" }, { type: "uint256" }], [credHash, BigInt(eventId)])
   );
   const held = await state.client.readContract({
     address: deskAddress(),
@@ -30499,15 +30513,26 @@ async function buyShow(show, wanted, status) {
   const button = app.querySelector("#buy");
   try {
     if (button) button.disabled = true;
+    if (phase(show) === "espera") throw new Error(`La venta abre el ${whenUnix(show.opensAt)}.`);
+    if (phase(show) === "cerrado" || phase(show) === "finalizado") throw new Error("La venta de esta funci\xF3n ya cerr\xF3.");
     status.textContent = "Conectando Aura\u2026";
     const account = state.account || await connect();
-    const held = await heldBy(account, show.id);
-    const room = Math.max(0, 4 - held);
-    const count = Math.min(wanted, room, show.inventory);
-    if (count < 1) throw new Error("Esta identidad ya tiene los 4 boletos de esta funci\xF3n.");
     const kind = chosenCred();
     status.textContent = kind === "key" ? "Leyendo la credencial de la llave\u2026" : "Leyendo la credencial autoatestada\u2026";
     const proof = await proofFor(account, show.id, kind);
+    const locked = await state.client.readContract({
+      address: deskAddress(),
+      abi: abi2,
+      functionName: "credOf",
+      args: [BigInt(show.id), account]
+    });
+    if (locked && locked !== `0x${"0".repeat(64)}` && locked.toLowerCase() !== proof.credHash.toLowerCase()) {
+      throw new Error("Esta funci\xF3n ya qued\xF3 con otra credencial. Las siguientes compras usan la primera, hasta los 4 boletos.");
+    }
+    const held = await heldBy(proof.credHash, show.id);
+    const room = Math.max(0, 4 - held);
+    const count = Math.min(wanted, room, show.inventory);
+    if (count < 1) throw new Error("Esa credencial ya tiene los 4 boletos de esta funci\xF3n.");
     status.textContent = count === 1 ? "Firmando la compra\u2026" : `Firmando ${count} boletos juntos\u2026`;
     await send(
       tx(
@@ -30518,7 +30543,7 @@ async function buyShow(show, wanted, status) {
     );
     location.hash = "#/boletos";
   } catch (error) {
-    status.textContent = error.shortMessage || error.message;
+    status.textContent = explain(error);
     if (button) button.disabled = false;
   }
 }
@@ -30708,6 +30733,15 @@ async function claim(passId, byId, status) {
     const kind = chosenCred();
     status.textContent = kind === "key" ? "Leyendo la credencial de la llave\u2026" : "Leyendo la credencial autoatestada\u2026";
     const proof = await proofFor(account, show.id, kind);
+    const locked = await state.client.readContract({
+      address: deskAddress(),
+      abi: abi2,
+      functionName: "credOf",
+      args: [BigInt(show.id), account]
+    });
+    if (locked && locked !== `0x${"0".repeat(64)}` && locked.toLowerCase() !== proof.credHash.toLowerCase()) {
+      throw new Error("Esta funci\xF3n ya qued\xF3 con otra credencial. Para recibir este boleto usa la misma.");
+    }
     status.textContent = price === 0n ? "Recibiendo el regalo\u2026" : `Pagando ${pas(price)}\u2026`;
     await send(
       tx(
@@ -30719,7 +30753,7 @@ async function claim(passId, byId, status) {
     writeOffers(readOffers().filter((item) => String(item.passId) !== String(passId)));
     boletos();
   } catch (error) {
-    status.textContent = error.shortMessage || error.message;
+    status.textContent = explain(error);
   }
 }
 function localInput(unix) {
@@ -31253,6 +31287,20 @@ async function submitEditor(ev, eventId, allowed, who) {
     status.textContent = error.shortMessage || error.message;
   }
 }
+var menuBtn = document.querySelector("#menu");
+var siteNav = document.querySelector("#site-nav");
+menuBtn?.addEventListener("click", () => {
+  const open = siteNav.classList.toggle("open");
+  menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  menuBtn.textContent = open ? "Cerrar" : "Men\xFA";
+});
+siteNav?.addEventListener("click", (event) => {
+  if (event.target.closest("a")) {
+    siteNav.classList.remove("open");
+    menuBtn?.setAttribute("aria-expanded", "false");
+    if (menuBtn) menuBtn.textContent = "Men\xFA";
+  }
+});
 walletBtn.onclick = async () => {
   try {
     await connect();
