@@ -29994,7 +29994,9 @@ var abi2 = [
       { name: "circuitNullifier", type: "bytes32" },
       { name: "hops", type: "uint8" },
       { name: "active", type: "bool" },
-      { name: "admitted", type: "bool" }
+      { name: "admitted", type: "bool" },
+      { name: "funder", type: "address" },
+      { name: "basis", type: "uint256" }
     ]
   },
   { type: "function", name: "withdraw", stateMutability: "nonpayable", inputs: [{ name: "eventId", type: "uint256" }], outputs: [] },
@@ -30040,6 +30042,13 @@ function pas(wei) {
   const n = Number(wei) / 1e18;
   if (!n) return "sin cobro en la red de pruebas";
   return `${n} PAS`;
+}
+function parsePas(raw) {
+  const text = String(raw ?? "").trim().replace(",", ".");
+  if (!/^\d+(\.\d+)?$/.test(text)) return null;
+  const [whole, frac = ""] = text.split(".");
+  if (frac.length > 18) return null;
+  return BigInt(whole) * 10n ** 18n + BigInt(frac.padEnd(18, "0"));
 }
 function hexWei(value) {
   return `0x${BigInt(value).toString(16)}`;
@@ -30413,7 +30422,7 @@ async function recinto(slug) {
 function ticketView(pass, show) {
   const entered = pass.status === "entro";
   const once = pass.hops === 0 && pass.status === "activo";
-  const note = entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.hops === 0 ? "primera mano" : "ya tuvo su cesi\xF3n";
+  const note = entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
   return `<article class="ticket">
     <img src="${imageOf(show)}" alt="" />
     <div>
@@ -30447,7 +30456,7 @@ async function boletos() {
       <h2>A mi nombre</h2>
       ${mine.map((pass) => ticketView(pass, byId.get(pass.eventId))).join("") || "<p>Todav\xEDa no tienes boletos activos.</p>"}
       <h2>Te cedieron</h2>
-      ${offers.map((offer) => `<article class="ticket"><div><p>Boleto ${esc(offer.passId)}</p><p class="meta">Al precio de cara. Esta cesi\xF3n es la \xFAnica.</p><button class="solid" type="button" data-claim="${esc(offer.passId)}">Recibir</button></div></article>`).join("") || "<p>Nadie te ha cedido un boleto.</p>"}
+      ${offers.map((offer) => `<article class="ticket"><div><p>Boleto ${esc(offer.passId)}</p><p class="meta">${esc(offerNote(offer))}</p><button class="solid" type="button" data-claim="${esc(offer.passId)}">Recibir</button></div></article>`).join("") || "<p>Nadie te ha cedido un boleto.</p>"}
       <p class="status" id="status"></p>
     </section>`;
   state.notice = "";
@@ -30456,7 +30465,7 @@ async function boletos() {
     button.onclick = () => act("returnPass", [BigInt(button.dataset.return)], status, () => boletos());
   });
   app.querySelectorAll("[data-offer]").forEach((button) => {
-    button.onclick = () => offerPass(button.dataset.offer, status);
+    button.onclick = () => offerPass(button.dataset.offer, button.dataset.event, status);
   });
   app.querySelectorAll("[data-claim]").forEach((button) => {
     button.onclick = () => claim(button.dataset.claim, byId, status);
@@ -30471,27 +30480,59 @@ async function act(name, args, status, done, value = 0n) {
     status.textContent = error.shortMessage || error.message;
   }
 }
-async function offerPass(passId, status) {
+function offerPrice(offer) {
+  if (offer?.price == null || offer.price === "") return null;
+  try {
+    return BigInt(offer.price);
+  } catch {
+    return null;
+  }
+}
+function offerNote(offer) {
+  const price = offerPrice(offer);
+  if (price == null) return "Esa cesi\xF3n no trae el monto.";
+  if (price === 0n) return "Regalo. Esta cesi\xF3n es la \xFAnica.";
+  return `Cobro de ${pas(price)}. Esta cesi\xF3n es la \xFAnica.`;
+}
+async function offerPass(passId, eventId, status) {
   try {
     const to = window.prompt("Direcci\xF3n de quien recibe el boleto");
     if (!to) return;
     const recipient = getAddress(to);
+    const show = await state.client.readContract({
+      address: deskAddress(),
+      abi: abi2,
+      functionName: "events",
+      args: [BigInt(eventId)]
+    });
+    const face = show.facePrice ?? show[3];
+    let price = 0n;
+    if (face > 0n) {
+      const raw = window.prompt(`Cobro en PAS. 0 es un regalo. M\xE1ximo ${pas(face)}.`, "0");
+      if (raw == null) return;
+      price = parsePas(raw);
+      if (price == null || price > face) {
+        status.textContent = "El cobro tiene que estar entre cero y el precio de cara.";
+        return;
+      }
+    }
     const deadline = Math.floor(Date.now() / 1e3) + 60 * 60 * 24;
     const structHash = keccak256(
       encodeAbiParameters(
-        [{ type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "address" }, { type: "uint64" }],
-        [BigInt(state.config.chainId), deskAddress(), BigInt(passId), recipient, BigInt(deadline)]
+        [{ type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "address" }, { type: "uint256" }, { type: "uint64" }],
+        [BigInt(state.config.chainId), deskAddress(), BigInt(passId), recipient, price, BigInt(deadline)]
       )
     );
     const signature = await aura().request({ method: "personal_sign", params: [structHash, state.account] });
-    const offer = { passId: Number(passId), to: recipient, deadline, signature, from: state.account };
+    const offer = { passId: Number(passId), to: recipient, deadline, signature, from: state.account, price: price.toString() };
     saveOffer(offer);
     const link = `${location.origin}${location.pathname}#/cesion/${encodeOffer(offer)}`;
+    const lead = price === 0n ? "Regalo firmado." : `Cesi\xF3n firmada por ${pas(price)}.`;
     try {
       await navigator.clipboard.writeText(link);
-      status.textContent = "La cesi\xF3n qued\xF3 copiada. P\xE1sale este enlace a quien recibe el boleto.";
+      status.textContent = `${lead} El enlace qued\xF3 copiado. Solo esa direcci\xF3n puede aceptarlo.`;
     } catch {
-      status.textContent = link;
+      status.textContent = `${lead} ${link}`;
     }
   } catch (error) {
     status.textContent = error.shortMessage || error.message;
@@ -30532,14 +30573,17 @@ async function claim(passId, byId, status) {
     const show = byId.get(pass?.eventId) || (await loadShows()).find((item) => item.id === pass?.eventId);
     if (!show) throw new Error("No est\xE1 la funci\xF3n de ese boleto.");
     if (pass.status === "entro") throw new Error("Ese boleto ya pas\xF3 la puerta. La cesi\xF3n qued\xF3 cerrada.");
+    const price = offerPrice(offer);
+    if (price == null) throw new Error("Esa cesi\xF3n no trae el monto. Pide que la firmen de nuevo.");
+    if (price > show.facePrice) throw new Error("Esa cesi\xF3n cobra m\xE1s que el precio de cara.");
     status.textContent = "Armando la prueba\u2026";
     const proof = await proofFor(account, show.id);
-    status.textContent = "Pagando el precio de cara\u2026";
+    status.textContent = price === 0n ? "Recibiendo el regalo\u2026" : `Pagando ${pas(price)}\u2026`;
     await send(
       tx(
         "claimTransfer",
         [BigInt(passId), BigInt(offer.deadline), proof.credHash, proof.chainNullifier, proof.proof, offer.signature],
-        show.facePrice
+        price
       )
     );
     writeOffers(readOffers().filter((item) => String(item.passId) !== String(passId)));
@@ -30620,7 +30664,7 @@ async function organizar() {
                           <label>Boletos <input name="capacity" type="number" min="${Math.max(1, show.sold)}" max="${show.venueCap}" value="${show.capacity}" required /></label>
                           <label>Precio de cara, pesos <input name="priceMxn" type="number" min="0" value="${show.priceMxn}" required /></label>
                           <label>Precio en la red, PAS <input name="pas" type="number" min="0" step="0.001" value="${Number(show.facePrice) / 1e18}" ${locked ? "disabled" : ""} /></label>
-                          ${locked ? '<p class="meta">El precio en la red queda fijo porque ya hay boletos vendidos. As\xED la devoluci\xF3n sigue siendo el precio de cara.</p>' : ""}
+                          ${locked ? '<p class="meta">El precio en la red queda fijo porque ya hay boletos vendidos. La cesi\xF3n no puede pasar de ese monto.</p>' : ""}
                           <label>Fecha y hora <input name="startsAt" type="datetime-local" required value="${localInput(show.closesAt)}" /></label>
                           <label>Cartel <input name="image" value="${esc(show.image)}" /></label>
                           <button class="solid" type="submit">Guardar en la red</button>
