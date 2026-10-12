@@ -30149,7 +30149,54 @@ function tx(name, args, value = 0n) {
     value: hexWei(value)
   };
 }
-async function proofFor(account, eventId) {
+function personProof(account, eventId, credHash) {
+  const nullifier = keccak256(
+    encodeAbiParameters(
+      [{ type: "address" }, { type: "uint256" }],
+      [getAddress(account), BigInt(eventId)]
+    )
+  );
+  return { credHash, chainNullifier: nullifier, proof: nullifier };
+}
+function asBytes32(value) {
+  const hex = String(value || "").toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(hex) ? hex : "";
+}
+async function walletCredentials() {
+  const rows = await aura().request({ method: "wallet_getCredentials" });
+  if (Array.isArray(rows)) return rows;
+  if (Array.isArray(rows?.credentials)) return rows.credentials;
+  return [];
+}
+function credPicker() {
+  return `<label>Credencial <select id="cred">
+      <option value="attest">Autoatestada \xB7 attest.peranto.app</option>
+      <option value="key">Llave oficial \xB7 key.peranto.app</option>
+    </select></label>`;
+}
+function chosenCred() {
+  return app.querySelector("#cred")?.value === "key" ? "key" : "attest";
+}
+async function proofFor(account, eventId, kind = "attest") {
+  let stored = [];
+  try {
+    stored = await walletCredentials();
+  } catch (error) {
+    if (kind === "key") throw new Error(error?.message || "Aura no mostr\xF3 las credenciales.");
+  }
+  if (kind === "key") {
+    const cred = stored.find((row) => row.schemaKey === "peranto:KeyPossession:v1");
+    const credHash = asBytes32(cred?.credHash);
+    if (!credHash) {
+      throw new Error("No hay credencial de llave en Aura. Cr\xE9ala en key.peranto.app y vuelve.");
+    }
+    return personProof(account, eventId, credHash);
+  }
+  const attested = stored.find(
+    (row) => row.schemaKey === "peranto:LivenessCheck:v1" || row.schemaKey === "peranto:AttestedId:v1"
+  );
+  const attestedHash = asBytes32(attested?.credHash);
+  if (attestedHash) return personProof(account, eventId, attestedHash);
   try {
     const res = await fetch("/api/proof", {
       method: "POST",
@@ -30169,17 +30216,7 @@ async function proofFor(account, eventId) {
     }
   } catch {
   }
-  const nullifier = keccak256(
-    encodeAbiParameters(
-      [{ type: "address" }, { type: "uint256" }],
-      [getAddress(account), BigInt(eventId)]
-    )
-  );
-  return {
-    credHash: keccak256(toBytes(`peranto:demo:${account.toLowerCase()}:${eventId}`)),
-    chainNullifier: nullifier,
-    proof: nullifier
-  };
+  return personProof(account, eventId, keccak256(toBytes(`peranto:demo:${account.toLowerCase()}:${eventId}`)));
 }
 async function loadShows() {
   const desk = deskAddress();
@@ -30409,8 +30446,8 @@ async function evento(id) {
         <div class="panel">
           <ol class="steps">
             <li>Conecta Aura en Paseo.</li>
-            <li>Elige cu\xE1ntos, hasta 4. Salen juntos.</li>
-            <li>Una sola firma. Los boletos quedan a tu identidad.</li>
+            <li>Elige la autoatestada o la de la llave oficial.</li>
+            <li>Elige cu\xE1ntos, hasta 4. Salen juntos, con una sola firma.</li>
           </ol>
           ${buyBox(show)}
           <p class="status" id="status"></p>
@@ -30437,6 +30474,7 @@ function buyBox(show) {
   const options = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
   const late = kind === "encurso" ? `<p class="meta">La funci\xF3n ya empez\xF3. Este boleto no se puede ceder.</p>` : "";
   return `<label>Cu\xE1ntos boletos <select id="qty">${options}</select></label>
+    ${credPicker()}
     <p class="meta" id="total"></p>
     ${late}
     <button class="solid" id="buy" type="button">Comprar con Aura</button>`;
@@ -30463,8 +30501,9 @@ async function buyShow(show, wanted, status) {
     const room = Math.max(0, 4 - held);
     const count = Math.min(wanted, room, show.inventory);
     if (count < 1) throw new Error("Esta identidad ya tiene los 4 boletos de esta funci\xF3n.");
-    status.textContent = "Armando la prueba\u2026";
-    const proof = await proofFor(account, show.id);
+    const kind = chosenCred();
+    status.textContent = kind === "key" ? "Leyendo la credencial de la llave\u2026" : "Leyendo la credencial autoatestada\u2026";
+    const proof = await proofFor(account, show.id, kind);
     status.textContent = count === 1 ? "Firmando la compra\u2026" : `Firmando ${count} boletos juntos\u2026`;
     await send(
       tx(
@@ -30541,6 +30580,7 @@ async function boletos() {
       <h2>A mi nombre</h2>
       ${mine.map((pass) => ticketView(pass, byId.get(pass.eventId))).join("") || "<p>Todav\xEDa no tienes boletos activos.</p>"}
       <h2>Te cedieron</h2>
+      ${offers.length ? credPicker() : ""}
       ${offers.map((offer) => `<article class="ticket"><div><p>Boleto ${esc(offer.passId)}</p><p class="meta">${esc(offerNote(offer))}</p><button class="solid" type="button" data-claim="${esc(offer.passId)}">Recibir</button></div></article>`).join("") || "<p>Nadie te ha cedido un boleto.</p>"}
       <p class="status" id="status"></p>
     </section>`;
@@ -30661,8 +30701,9 @@ async function claim(passId, byId, status) {
     const price = offerPrice(offer);
     if (price == null) throw new Error("Esa cesi\xF3n no trae el monto. Pide que la firmen de nuevo.");
     if (price > show.facePrice) throw new Error("Esa cesi\xF3n cobra m\xE1s que el precio de cara.");
-    status.textContent = "Armando la prueba\u2026";
-    const proof = await proofFor(account, show.id);
+    const kind = chosenCred();
+    status.textContent = kind === "key" ? "Leyendo la credencial de la llave\u2026" : "Leyendo la credencial autoatestada\u2026";
+    const proof = await proofFor(account, show.id, kind);
     status.textContent = price === 0n ? "Recibiendo el regalo\u2026" : `Pagando ${pas(price)}\u2026`;
     await send(
       tx(
