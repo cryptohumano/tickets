@@ -30666,23 +30666,39 @@ async function recinto(slug) {
       <div class="grid">${shows.map(card).join("") || "<p>Todav\xEDa no hay funciones aqu\xED.</p>"}</div>
     </section>`;
 }
-function ticketView(pass, show) {
-  const entered = pass.status === "entro";
+function currentTicketGroup(rows, show) {
   const dropped = Boolean(show?.cancelled);
-  const closed = show && (dropped || phase(show) === "finalizado" || phase(show) === "cerrado");
-  const once = !closed && !pass.late && pass.hops === 0 && pass.status === "activo";
-  const note = dropped ? show.refundPercent > 0 ? `La funci\xF3n se elimin\xF3. Puedes cobrar el ${show.refundPercent}% de lo pagado.` : "La funci\xF3n se elimin\xF3. No hay reembolso." : show?.finalized ? "La funci\xF3n termin\xF3. Este boleto venci\xF3." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
-  const refund = dropped && pass.status === "activo" ? `<button class="solid" type="button" data-refund="${pass.passId}">${show.refundPercent > 0 ? "Cobrar reembolso" : "Cerrar boleto"}</button>` : "";
-  return `<article class="ticket">
-    <img src="${imageOf(show)}" alt="" />
-    <div>
-      <h2>${esc(show?.title || "Boleto")}</h2>
-      <p class="meta">${show ? whenUnix(show.closesAt) : ""} \xB7 ${note}</p>
-      <div class="row">
-        ${refund}
-        ${once ? `<button class="ghost" type="button" data-offer="${pass.passId}" data-event="${pass.eventId}">Ceder una vez</button>` : ""}
-        ${!closed && pass.status === "activo" ? `<button class="ghost" type="button" data-return="${pass.passId}">Devolver a la taquilla</button>` : ""}
-      </div>
+  return `<article class="pass-group">
+    <div class="pass-group-head">
+      ${show ? `<img src="${imageOf(show)}" alt="" />` : ""}
+      <div><p class="meta">${show ? whenUnix(show.closesAt) : ""}</p><h3>${esc(show?.title || "Boletos")}</h3><p class="meta">${rows.length} ${rows.length === 1 ? "boleto" : "boletos"} a tu nombre</p></div>
+    </div>
+    <div class="pass-items">${rows.map((pass) => {
+    const once = !dropped && !pass.late && pass.hops === 0 && pass.status === "activo";
+    const stateLabel = dropped ? "Reembolso" : "Disponible";
+    const note = dropped ? show.refundPercent > 0 ? `La funci\xF3n se elimin\xF3. Puedes cobrar el ${show.refundPercent}% de lo pagado.` : "La funci\xF3n se elimin\xF3. Cierra este boleto para retirarlo." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez o devolverlo antes del cierre." : "Este boleto ya tuvo su \xFAnica cesi\xF3n.";
+    const refund = dropped && pass.status === "activo" ? `<button class="solid" type="button" data-refund="${pass.passId}">${show.refundPercent > 0 ? "Cobrar reembolso" : "Cerrar boleto"}</button>` : "";
+    return `<details class="pass-item" ${dropped ? "open" : ""}>
+        <summary><span>Boleto ${esc(pass.passId)}</span><span class="badge">${esc(stateLabel)}</span></summary>
+        <p>${esc(note)}</p>
+        <div class="row ticket-actions">
+          ${refund}
+          ${once ? `<button class="ghost" type="button" data-offer="${pass.passId}" data-event="${pass.eventId}">Ceder boleto</button>` : ""}
+          ${!dropped && pass.status === "activo" ? `<button class="ghost" type="button" data-return="${pass.passId}">Devolver a taquilla</button>` : ""}
+        </div>
+      </details>`;
+  }).join("")}</div>
+  </article>`;
+}
+function historyTicketView(rows, show) {
+  const entered = rows.some((pass) => pass.status === "entro");
+  const note = show?.cancelled ? "Funci\xF3n cancelada" : entered ? "Boleto utilizado" : "La funci\xF3n termin\xF3";
+  return `<article class="ticket history-ticket">
+    ${show ? `<img src="${imageOf(show)}" alt="" />` : ""}
+    <div class="ticket-copy">
+      <div class="ticket-top"><span class="badge finalizado">${entered ? "Utilizado" : "Vencido"}</span><span class="meta">${rows.length} ${rows.length === 1 ? "boleto" : "boletos"}</span></div>
+      <h3>${esc(show?.title || "Boleto")}</h3>
+      <p class="meta">${show ? whenUnix(show.closesAt) : ""} \xB7 ${note}.</p>
     </div>
   </article>`;
 }
@@ -30698,7 +30714,26 @@ async function boletos() {
   const [shows, passes] = await Promise.all([loadShows(), loadPasses()]);
   const byId = new Map(shows.map((show) => [show.id, show]));
   const mine = passes.filter((pass) => (pass.status === "activo" || pass.status === "entro") && pass.holder.toLowerCase() === state.account.toLowerCase());
+  const current = mine.filter((pass) => {
+    const show = byId.get(pass.eventId);
+    if (show?.cancelled && pass.status === "activo") return true;
+    return pass.status !== "entro" && show && !["cerrado", "finalizado"].includes(phase(show));
+  }).sort((a, b) => (byId.get(a.eventId)?.closesAt || 0) - (byId.get(b.eventId)?.closesAt || 0));
+  const currentGroups = [...current.reduce((groups, pass) => {
+    const key = String(pass.eventId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(pass);
+    return groups;
+  }, /* @__PURE__ */ new Map()).values()];
+  const history = mine.filter((pass) => !current.includes(pass));
+  const historyGroups = [...history.reduce((groups, pass) => {
+    const key = String(pass.eventId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(pass);
+    return groups;
+  }, /* @__PURE__ */ new Map()).values()].sort((a, b) => (byId.get(b[0].eventId)?.closesAt || 0) - (byId.get(a[0].eventId)?.closesAt || 0));
   const offers = readOffers().filter((offer) => offer.to.toLowerCase() === state.account.toLowerCase());
+  const passById = new Map(passes.map((pass) => [String(pass.passId), pass]));
   const organizers = [...new Map(mine.map((pass) => {
     const show = byId.get(pass.eventId);
     const organizer = show?.organizer;
@@ -30715,22 +30750,53 @@ async function boletos() {
   })) : [];
   const followedSet = new Set(followed.filter(Boolean));
   app.innerHTML = `
-    <section class="page">
-      <h1>Mis boletos</h1>
-      <p class="lead">${esc(state.account)}</p>
-      <p class="status">${esc(state.notice)}</p>
-      <h2>A mi nombre</h2>
-      ${mine.map((pass) => ticketView(pass, byId.get(pass.eventId))).join("") || "<p>Todav\xEDa no tienes boletos activos.</p>"}
-      ${followAddress() && organizers.length ? `<h2>Avisos del organizador</h2>
-            <p class="meta">Activarlos y quitarlos son firmas aparte y gastan gas. No cambian si t\xFA no firmas.</p>
-            ${organizers.map((organizer) => {
+    <section class="page wallet-page">
+      <header class="wallet-header">
+        <div><p class="meta">Tu cartera</p><h1>Mis boletos</h1></div>
+        <div class="account-chip" title="${esc(state.account)}">${identicon(state.account)}<span>${esc(shortAddress(state.account))}</span></div>
+      </header>
+      <p class="status wallet-status" id="status">${esc(state.notice)}</p>
+
+      <section class="wallet-section">
+        <div class="section-heading"><div><p class="meta">Listos para usar</p><h2>Pr\xF3ximos boletos</h2></div><span>${current.length}</span></div>
+        <div class="ticket-list">${currentGroups.map((rows) => currentTicketGroup(rows, byId.get(rows[0].eventId))).join("") || `<div class="compact-empty"><p>No tienes boletos pr\xF3ximos.</p><a href="#/">Ver cartelera</a></div>`}</div>
+      </section>
+
+      <section class="wallet-section transfer-section">
+        <div class="section-heading"><div><p class="meta">Cesiones dirigidas a tu cartera</p><h2>Boletos por aceptar</h2></div><span>${offers.length}</span></div>
+        ${offers.length ? `<div class="transfer-help"><strong>Antes de aceptar</strong><p>Revisa el evento y el monto. Aura te pedir\xE1 confirmar la recepci\xF3n; nadie m\xE1s puede usar esta cesi\xF3n.</p>${credPicker()}</div>` : ""}
+        <div class="ticket-list">
+          ${offers.map((offer) => {
+    const pass = passById.get(String(offer.passId));
+    const show = byId.get(pass?.eventId);
+    return `<article class="transfer-card">
+              <div><p class="meta">Te enviaron el boleto ${esc(offer.passId)}</p><h3>${esc(show?.title || "Boleto por aceptar")}</h3><p>${esc(offerNote(offer))}</p><p class="meta">De ${esc(shortAddress(offer.from))}</p></div>
+              <button class="solid" type="button" data-claim="${esc(offer.passId)}">Revisar y aceptar</button>
+            </article>`;
+  }).join("") || `<div class="compact-empty"><p>No tienes boletos pendientes de aceptar.</p></div>`}
+        </div>
+      </section>
+
+      ${followAddress() && organizers.length ? `<section class="wallet-section notices-section">
+            <div class="section-heading"><div><p class="meta">Opcionales y controlados por ti</p><h2>Avisos de organizadores</h2></div><span>${organizers.length}</span></div>
+            <p class="section-intro">Activa avisos para enterarte de sus pr\xF3ximas funciones. Activarlos o desactivarlos requiere una firma en Aura y gas de prueba; no compra ning\xFAn boleto.</p>
+            <div class="notice-list">${organizers.map((organizer) => {
     const on = followedSet.has(organizer.toLowerCase());
-    return `<article class="ticket"><div><p>${esc(organizer)}</p><p class="meta">${on ? "Recibes avisos de sus pr\xF3ximas funciones." : "No est\xE1s suscrito."}</p><button class="ghost" type="button" data-${on ? "unfollow" : "follow"}="${esc(organizer)}">${on ? "Quitar avisos" : "Recibir avisos"}</button></div></article>`;
-  }).join("")}` : ""}
-      <h2>Te cedieron</h2>
-      ${offers.length ? credPicker() : ""}
-      ${offers.map((offer) => `<article class="ticket"><div><p>Boleto ${esc(offer.passId)}</p><p class="meta">${esc(offerNote(offer))}</p><button class="solid" type="button" data-claim="${esc(offer.passId)}">Recibir</button></div></article>`).join("") || "<p>Nadie te ha cedido un boleto.</p>"}
-      <p class="status" id="status"></p>
+    const titles = [...new Set(mine.filter((pass) => byId.get(pass.eventId)?.organizer?.toLowerCase() === organizer.toLowerCase()).map((pass) => byId.get(pass.eventId)?.title).filter(Boolean))];
+    const context = titles.length > 1 ? `${titles[0]} y ${titles.length - 1} m\xE1s` : titles[0] || "tus eventos";
+    return `<article class="notice-card ${on ? "on" : "off"}">
+                <div class="notice-card-top"><div><p class="meta">Organizador de</p><h3>${esc(context)}</h3></div><span class="subscription-state">${on ? "Avisos activos" : "Avisos apagados"}</span></div>
+                <p class="organizer-address" title="${esc(organizer)}">${esc(shortAddress(organizer))}</p>
+                <p>${on ? "Recibir\xE1s sus pr\xF3ximos avisos en esta cartera." : "No recibir\xE1s avisos de este organizador."}</p>
+                <button class="${on ? "ghost" : "solid"}" type="button" data-${on ? "unfollow" : "follow"}="${esc(organizer)}">${on ? "Desactivar avisos" : "Activar avisos"}</button>
+              </article>`;
+  }).join("")}</div>
+          </section>` : ""}
+
+      <details class="wallet-section history-section" ${current.length ? "" : "open"}>
+        <summary><span><small>Funciones anteriores</small><strong>Historial</strong></span><span>${history.length} ${history.length === 1 ? "boleto" : "boletos"}</span></summary>
+        <div class="ticket-list">${historyGroups.map((rows) => historyTicketView(rows, byId.get(rows[0].eventId))).join("") || `<div class="compact-empty"><p>Tu historial est\xE1 vac\xEDo.</p></div>`}</div>
+      </details>
     </section>`;
   state.notice = "";
   const status = app.querySelector("#status");
@@ -30747,10 +30813,20 @@ async function boletos() {
     button.onclick = () => claim(button.dataset.claim, byId, status);
   });
   app.querySelectorAll("[data-follow]").forEach((button) => {
-    button.onclick = () => actFollow("follow", [getAddress(button.dataset.follow)], status, () => boletos());
+    button.onclick = async () => {
+      status.textContent = "Confirma en Aura para activar los avisos\u2026";
+      button.disabled = true;
+      await actFollow("follow", [getAddress(button.dataset.follow)], status, () => boletos());
+      if (button.isConnected) button.disabled = false;
+    };
   });
   app.querySelectorAll("[data-unfollow]").forEach((button) => {
-    button.onclick = () => actFollow("unfollow", [getAddress(button.dataset.unfollow)], status, () => boletos());
+    button.onclick = async () => {
+      status.textContent = "Confirma en Aura para desactivar los avisos\u2026";
+      button.disabled = true;
+      await actFollow("unfollow", [getAddress(button.dataset.unfollow)], status, () => boletos());
+      if (button.isConnected) button.disabled = false;
+    };
   });
 }
 async function act(name, args, status, done, value = 0n) {
@@ -31556,6 +31632,7 @@ var mobileMenuBtn = document.querySelector("#mobileMenu");
 var siteNav = document.querySelector("#site-nav");
 function setMenu(open) {
   siteNav?.classList.toggle("open", open);
+  document.body.classList.toggle("menu-open", open);
   menuBtn?.setAttribute("aria-expanded", open ? "true" : "false");
   mobileMenuBtn?.setAttribute("aria-expanded", open ? "true" : "false");
   if (menuBtn) menuBtn.textContent = open ? "Cerrar" : "Men\xFA";
@@ -31566,6 +31643,14 @@ siteNav?.addEventListener("click", (event) => {
   if (event.target.closest("a")) {
     setMenu(false);
   }
+});
+document.addEventListener("click", (event) => {
+  if (!siteNav?.classList.contains("open")) return;
+  if (siteNav.contains(event.target) || mobileMenuBtn?.contains(event.target) || menuBtn?.contains(event.target)) return;
+  setMenu(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setMenu(false);
 });
 walletBtn.onclick = async () => {
   try {
