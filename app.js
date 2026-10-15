@@ -30373,7 +30373,7 @@ function phase(show) {
   return "cerrado";
 }
 function phaseLabel(show) {
-  return { eliminado: "Eliminada", espera: "Pr\xF3xima", publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Finalizado" }[phase(show)];
+  return { eliminado: "Eliminada", espera: "Pr\xF3xima", publicado: "Publicado", encurso: "En curso", cerrado: "Cerrado", finalizado: "Terminada" }[phase(show)];
 }
 function phaseNote(show) {
   const kind = phase(show);
@@ -30381,8 +30381,8 @@ function phaseNote(show) {
   if (kind === "espera") return `La venta abre el ${whenUnix(show.opensAt)}.`;
   if (kind === "publicado") return "Antes de la funci\xF3n. La venta est\xE1 abierta y cada boleto se puede ceder una vez.";
   if (kind === "encurso") return "La funci\xF3n ya empez\xF3. Se puede vender 30 minutos m\xE1s. Ese boleto no se cede.";
-  if (kind === "cerrado") return "Despu\xE9s de la funci\xF3n. La venta cerr\xF3. Finalizar apaga la puerta y las devoluciones.";
-  return "Finalizado. Todos los pases quedan cerrados: no se venden, no se ceden y no se devuelven.";
+  if (kind === "cerrado") return "La venta ya cerr\xF3. Marca la funci\xF3n como terminada para que los boletos en las carteras pasen a vencidos.";
+  return "La funci\xF3n termin\xF3. Los boletos en las carteras quedan vencidos.";
 }
 function shortAddress(value) {
   const text = String(value || "");
@@ -30589,7 +30589,7 @@ function ticketView(pass, show) {
   const dropped = Boolean(show?.cancelled);
   const closed = show && (dropped || phase(show) === "finalizado" || phase(show) === "cerrado");
   const once = !closed && !pass.late && pass.hops === 0 && pass.status === "activo";
-  const note = dropped ? show.refundPercent > 0 ? `La funci\xF3n se elimin\xF3. Puedes cobrar el ${show.refundPercent}% de lo pagado.` : "La funci\xF3n se elimin\xF3. No hay reembolso." : show?.finalized ? "La funci\xF3n finaliz\xF3. Este pase qued\xF3 cerrado." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
+  const note = dropped ? show.refundPercent > 0 ? `La funci\xF3n se elimin\xF3. Puedes cobrar el ${show.refundPercent}% de lo pagado.` : "La funci\xF3n se elimin\xF3. No hay reembolso." : show?.finalized ? "La funci\xF3n termin\xF3. Este boleto venci\xF3." : entered ? "Ya pas\xF3 la puerta. No se puede ceder ni devolver." : pass.late ? "Se compr\xF3 despu\xE9s de empezar. No se puede ceder." : pass.hops === 0 ? "Puedes cederlo una vez, de regalo o hasta el precio de cara." : "ya tuvo su cesi\xF3n";
   const refund = dropped && pass.status === "activo" ? `<button class="solid" type="button" data-refund="${pass.passId}">${show.refundPercent > 0 ? "Cobrar reembolso" : "Cerrar boleto"}</button>` : "";
   return `<article class="ticket">
     <img src="${imageOf(show)}" alt="" />
@@ -30851,7 +30851,7 @@ function eventCard(show) {
       <h2>${esc(show.title)}</h2>
       <p class="meta">${whenUnix(show.closesAt)} \xB7 ${esc(venue?.name || show.venue)}</p>
       <div class="bar" aria-hidden="true"><span style="width:${pct}%"></span></div>
-      <p class="meta">${show.sold} vendidos \xB7 ${row.refunds} reembolsos \xB7 ${show.admitted} entradas</p>
+      <p class="meta">${show.sold} vendidos \xB7 ${row.refunds} reembolsos \xB7 ${show.admitted} entradas${isOrganizer(show) && !show.cancelled && !show.finalized && show.closesAt && Date.now() / 1e3 >= show.closesAt ? " \xB7 Puedes marcarla como terminada" : ""}</p>
     </div>
   </a>`;
 }
@@ -30979,7 +30979,7 @@ async function tablero(id) {
       </div>
       <div class="row">
         <a class="ghost" href="#/puerta">Puerta</a>
-        ${canFinalize ? `<button class="solid" id="finalize" type="button">Finalizar funci\xF3n</button>` : ""}
+        ${canFinalize ? `<button class="solid" id="finalize" type="button">La funci\xF3n termin\xF3</button>` : ""}
         ${canWithdraw ? `<button class="ghost" id="withdraw" type="button">${show.cancelled ? "Retirar lo que queda" : "Retirar custodia"}</button>` : ""}
         ${show.cancelled ? "" : `<button class="ghost" type="button" data-panel="modificar">Modificar</button>`}
         ${canCancel ? `<button class="ghost" type="button" data-panel="eliminar">Eliminar</button>` : ""}
