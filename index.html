@@ -10,25 +10,35 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,640&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/app.css" />
+  <link rel="stylesheet" href="/app.css?v=21" />
 </head>
 <body>
   <header class="top">
     <a class="brand" href="#/">CiGo <span>taquilla</span></a>
     <button id="menu" type="button" aria-expanded="false" aria-controls="site-nav">Menú</button>
     <nav id="site-nav">
-      <a href="#/" data-nav="cartelera">Cartelera</a>
-      <a href="#/recintos" data-nav="recintos">Recintos</a>
-      <a href="#/boletos" data-nav="boletos">Mis boletos</a>
-      <a href="#/puerta" data-nav="puerta">Puerta</a>
-      <a href="#/organizar" data-nav="organizar">Organizar</a>
+      <div class="nav-primary">
+        <a href="#/" data-nav="cartelera">Cartelera</a>
+        <a href="#/boletos" data-nav="boletos">Mis boletos</a>
+        <a href="#/recintos" data-nav="recintos">Recintos</a>
+      </div>
+      <div class="nav-ops">
+        <span>Operación</span>
+        <a href="#/puerta" data-nav="puerta">Puerta</a>
+        <a href="#/organizar" data-nav="organizar">Organizar</a>
+      </div>
     </nav>
     <button id="wallet" type="button">Conectar Aura</button>
   </header>
   <main id="app"></main>
+  <nav class="mobile-tabs" aria-label="Navegación móvil">
+    <a href="#/" data-mobile-nav="cartelera"><span aria-hidden="true">⌂</span>Cartelera</a>
+    <a href="#/boletos" data-mobile-nav="boletos"><span aria-hidden="true">▣</span>Boletos</a>
+    <button id="mobileMenu" type="button" data-mobile-nav="more" aria-expanded="false" aria-controls="site-nav"><span aria-hidden="true">•••</span>Más</button>
+  </nav>
   <footer>
-    <p>El boleto vive en tu identidad. Hasta cuatro por evento, una sola cesión de regalo o hasta el precio de cara. La venta sigue 30 minutos después de empezar, y ese boleto no se cede. Quien organiza puede finalizar la función.</p>
+    <p>Boletos ligados a tu identidad, verificables desde CiGo y con reglas visibles antes de comprar.</p>
   </footer>
-  <script type="module" src="/app.js?v=18"></script>
+  <script type="module" src="/app.js?v=21"></script>
 </body>
 </html>
