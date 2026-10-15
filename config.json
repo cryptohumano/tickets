@@ -132,5 +132,7 @@
       "slug": "cultura",
       "name": "Cultura"
     }
-  ]
+  ],
+  "follow": "0xc44C7aD580802aCB1e7aD2208BA7398645c9d7c6",
+  "followFromBlock": 14460849
 }
