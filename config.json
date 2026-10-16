@@ -1,6 +1,7 @@
 {
   "address": "0x0cef319F4c60B2Be97D8a98E81e1bc3F4c14AF1b",
   "desk": "0x0cef319F4c60B2Be97D8a98E81e1bc3F4c14AF1b",
+  "safety": "0xC782f509f603BDD2487B950A77C73314DFBFC201",
   "chainId": 420420417,
   "rpc": "https://eth-rpc-testnet.polkadot.io/",
   "deployer": "0x354151d1039Ba06862f8a5062b37BCb8b082cEDF",

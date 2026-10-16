@@ -572,6 +572,10 @@ a.solid, a.link { text-decoration: none; display: inline-block; }
 @keyframes loading { to { background-position: -200% 0; } }
 .flyer { position: relative; margin: 0 0 12px; }
 .badge { display: inline-block; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: #e7f4f8; color: var(--deep); }
+.safety-seal { margin: 8px 0 0; color: var(--deep); font-weight: 600; }
+.ficha { display: grid; gap: 8px; margin: 0 0 18px; }
+.ficha-code svg { width: 220px; height: 220px; }
+.ficha-text { margin: 0; white-space: pre-wrap; font-size: 13px; }
 .badge.encurso, .badge.espera { background: #f3e6c4; color: #6a4b12; }
 .badge.cerrado, .badge.finalizado, .badge.eliminado { background: #ece7e1; color: var(--muted); }
 .flyer .badge { position: absolute; left: 12px; top: 12px; }
@@ -726,4 +730,96 @@ legend { padding: 0 6px; color: var(--ink); }
   .business-metrics { grid-template-columns: 1fr; }
   .business-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .event-card-metrics { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+.hero-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.hero-title h1 { margin: 0; }
+.event-toolbar-actions { display: flex; gap: 8px; align-items: center; }
+.event-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0 18px; border-bottom: 1px solid var(--line); position: sticky; top: 68px; z-index: 2; background: var(--paper); }
+.event-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.event-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--deep); font-weight: 600; }
+.risk-menu { position: relative; }
+.risk-menu summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: var(--card);
+  letter-spacing: 0.12em;
+}
+.risk-menu summary::-webkit-details-marker { display: none; }
+.risk-menu div {
+  position: absolute;
+  right: 0;
+  z-index: 6;
+  display: grid;
+  min-width: 220px;
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.risk-menu button { text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.risk-menu button:hover { background: #efeae2; }
+.metric-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.metric-board section { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+.metric-board h2 { margin: 0 0 8px; font-size: 15px; font-family: Outfit, sans-serif; }
+.metric-figure { font-family: Fraunces, serif; font-size: 36px; margin: 0 0 6px; line-height: 1.1; }
+.metric-figure span { font-family: Outfit, sans-serif; font-size: 14px; color: var(--muted); }
+.metric-board p { margin: 4px 0; }
+.count-badge { display: inline-grid; place-items: center; min-width: 28px; height: 28px; margin-right: 6px; padding: 0 8px; border-radius: 999px; background: #e7f4f8; color: var(--deep); font-weight: 600; }
+.official-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: grid; gap: 14px; }
+.official-card header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.official-card header p { margin: 0; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12px; color: var(--muted); }
+.official-body { display: grid; grid-template-columns: 1fr 168px; gap: 16px; align-items: center; }
+.official-card h2 { font-family: Fraunces, serif; margin: 0 0 4px; }
+.official-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 0; }
+.official-card dt { color: var(--muted); font-size: 12px; }
+.official-card dd { margin: 0; font-weight: 600; }
+.qr-frame { background: white; border: 8px solid #e7f4f8; border-radius: 16px; padding: 8px; }
+.qr-frame svg { width: 100%; height: auto; display: block; }
+.tech-details { margin: 12px 0 20px; }
+.tech-details summary { cursor: pointer; color: var(--muted); }
+.dropzone {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 120px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,.65);
+  text-align: center;
+  padding: 16px;
+  color: var(--muted);
+}
+.dropzone.over { border-color: var(--deep); background: #e7f4f8; color: var(--ink); }
+.dropzone input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+.plan-wizard h2 { font-family: Fraunces, serif; margin: 0; }
+.plan-steps { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; padding: 0; margin: 0; }
+.plan-steps li { padding: 6px 10px; border-radius: 999px; background: #efeae2; color: var(--muted); font-size: 14px; }
+.plan-steps li.on { background: var(--deep); color: white; }
+.reconcile { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.reconcile div { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+.reconcile p { margin: 0; color: var(--muted); font-size: 13px; }
+.reconcile b { display: block; margin-top: 4px; font-family: Fraunces, serif; font-size: 32px; color: var(--ink); }
+.ok-badge { display: inline-block; margin: 10px 0; padding: 6px 10px; border-radius: 999px; background: #e5f6ea; color: #146c36; font-weight: 600; }
+.person-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.person-chip { padding: 8px 12px; border-radius: 999px; background: white; border: 1px solid var(--line); }
+.plan-note { min-height: 1.2em; margin: 0; color: #8a2d2d; font-weight: 600; }
+dialog { border: 0; border-radius: 18px; padding: 8px 18px 18px; max-width: 480px; }
+dialog::backdrop { background: rgba(10,16,24,.4); }
+dialog h2 { font-family: Fraunces, serif; }
+@media (max-width: 800px) {
+  .metric-board, .official-body, .reconcile, .official-card dl { grid-template-columns: 1fr; }
+  .hero-title { align-items: stretch; }
 }
